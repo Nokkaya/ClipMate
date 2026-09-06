@@ -10,6 +10,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onOpenSettings: (() -> Void)?
     var onHistoryChanged: (() -> Void)?
     var onSuppressCapture: (() -> Void)?
+    var onExportHistory: (() -> Void)?
+    var onImportHistory: (() -> Void)?
 
     init(settings: AppSettings, store: ClipStore) {
         self.settings = settings
@@ -75,6 +77,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         clearItem.isEnabled = true
         menu.addItem(clearItem)
 
+        let exportItem = NSMenuItem(title: "导出历史…", action: #selector(exportHistoryAction), keyEquivalent: "")
+        exportItem.target = self
+        exportItem.isEnabled = true
+        menu.addItem(exportItem)
+
+        let importItem = NSMenuItem(title: "导入历史…", action: #selector(importHistoryAction), keyEquivalent: "")
+        importItem.target = self
+        importItem.isEnabled = true
+        menu.addItem(importItem)
+
         menu.addItem(.separator())
 
         let settingsItem = NSMenuItem(title: "设置…", action: #selector(openSettingsAction), keyEquivalent: ",")
@@ -103,6 +115,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         try? store.deleteAll(keepPinned: true)
         onHistoryChanged?()
     }
+
+    @objc private func exportHistoryAction() { onExportHistory?() }
+    @objc private func importHistoryAction() { onImportHistory?() }
 
     @objc private func openSettingsAction() { onOpenSettings?() }
 }

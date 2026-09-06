@@ -220,6 +220,87 @@ runner.run("FTS5 可用性标记一致") {
     print("   ℹ️ FTS5 可用：\(store.supportsFullTextSearch)")
 }
 
+runner.run("向量编解码与余弦相似度") {
+    let original: [Float] = [0.1, -0.4, 0.9, 2.5, -3.0]
+    let data = ClipStore.data(from: original.map(Double.init))
+    let restored = ClipStore.vectors(from: data)
+    runner.expectTrue(restored != nil && restored?.count == original.count, "编解码 roundtrip 长度一致")
+    runner.expectTrue(abs(ClipStore.cosine(original, original) - 1.0) < 0.001, "自余弦≈1")
+    runner.expectTrue(abs(ClipStore.cosine([1, 0], [0, 1])) < 0.001, "正交向量余弦≈0")
+    runner.expectTrue(ClipStore.vectors(from: Data([0, 1])) == nil, "非整倍长度数据应拒绝解析")
+}
+
+runner.run("导入导出 roundtrip") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    _ = try store.capture(kind: .text, plainText: "export alpha", sourceBundle: "a", sourceName: "A")
+    _ = try store.capture(kind: .url, plainText: "https://example.org/x", sourceBundle: "b", sourceName: "B", tags: ["链接"])
+    let oldDate = Date(timeIntervalSince1970: 1_600_000_000)
+    _ = try store.capture(kind: .text, plainText: "export gamma", sourceBundle: "a", sourceName: "A", createdAt: oldDate)
+    let data = try store.exportJSON()
+
+    let (target, targetDir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: targetDir) }
+    let imported = try target.importJSON(data)
+    runner.expectEqual(imported, 3, "应导入 3 条")
+    runner.expectTrue(!target.search(query: "alpha", filter: .all, limit: 10).isEmpty, "导入内容可检索")
+    let gamma = target.search(query: "gamma", filter: .all, limit: 10).first
+    runner.expectTrue(gamma != nil, "gamma 条目存在")
+    if let gamma {
+        runner.expectTrue(abs(gamma.createdAt.timeIntervalSince1970 - 1_600_000_000) < 1, "原始时间应还原")
+    }
+    let again = try target.importJSON(data)
+    runner.expectEqual(again, 0, "重复导入应全部去重")
+}
+
+runner.run("语义向量检索（系统句向量可用时）") {
+    guard EmbeddingService.isAvailable else {
+        print("   ℹ️ 系统句向量不可用，跳过语义用例")
+        return
+    }
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("clipmate-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let database = try Database(url: dir.appendingPathComponent("test.sqlite"))
+    let vecStore = try ClipStore(
+        database: database,
+        blobStore: BlobStore(directory: dir.appendingPathComponent("blobs")),
+        embeddingProvider: { EmbeddingService.embed(text: $0) }
+    )
+    _ = try vecStore.capture(kind: .text, plainText: "payment failed with error code 5002, transaction declined by bank", sourceBundle: "a", sourceName: "A")
+    _ = try vecStore.capture(kind: .text, plainText: "今天天气非常好，阳光明媚适合出门散步", sourceBundle: "a", sourceName: "A")
+    for entry in vecStore.itemsNeedingEmbedding(limit: 10) {
+        if let data = EmbeddingService.embed(text: entry.text) {
+            vecStore.setEmbedding(entry.id, data)
+        }
+    }
+    runner.expectEqual(vecStore.embeddedCount, 2, "向量补算完成")
+    let results = vecStore.search(query: "bank transaction error", filter: .all, limit: 2)
+    runner.expectTrue(results.first?.plainText.contains("payment") == true, "语义检索应把支付报错排最前")
+}
+
+runner.run("图片 OCR（Vision 可用时）") {
+    let image = NSImage(size: NSSize(width: 380, height: 90))
+    image.lockFocus()
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: 380, height: 90).fill()
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 30, weight: .bold),
+        .foregroundColor: NSColor.black,
+    ]
+    ("CLIPMATE 2026" as NSString).draw(at: NSPoint(x: 20, y: 30), withAttributes: attributes)
+    image.unlockFocus()
+    guard let tiff = image.tiffRepresentation else {
+        runner.expectTrue(false, "生成测试图片失败")
+        return
+    }
+    guard let text = ClipboardReader.recognizeText(in: tiff) else {
+        print("   ℹ️ Vision OCR 不可用，跳过")
+        return
+    }
+    runner.expectTrue(text.contains("CLIPMATE"), "OCR 应识别出 CLIPMATE，实际：\(text.prefix(40))")
+}
+
 print("----")
 if runner.failures.isEmpty {
     print("全部 \(runner.passed) 个用例通过 ✅")

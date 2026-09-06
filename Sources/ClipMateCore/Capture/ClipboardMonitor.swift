@@ -55,7 +55,8 @@ public final class ClipboardMonitor {
         let changeCount = pb.changeCount
         captureQueue.async { [weak self] in
             guard let self else { return }
-            guard let content = ClipboardReader.read(from: pb, maxBytes: self.settings.maxCaptureBytes) else { return }
+            guard let content = ClipboardReader.read(from: pb, maxBytes: self.settings.maxCaptureBytes,
+                                                     ocrEnabled: self.settings.imageOCREnabled) else { return }
             DispatchQueue.main.async {
                 // 读取期间剪贴板又变了：放弃本次，交给下一轮。
                 guard NSPasteboard.general.changeCount == changeCount else { return }

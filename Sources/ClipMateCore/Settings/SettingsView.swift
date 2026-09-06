@@ -60,6 +60,7 @@ private struct CaptureTab: View {
             Stepper("最多保留 \(settings.retentionMaxItems) 条", value: $settings.retentionMaxItems, in: 50...10000, step: 50)
             Stepper("保留最近 \(settings.retentionMaxAgeDays) 天", value: $settings.retentionMaxAgeDays, in: 1...365)
             Stepper("单条内容上限 \(settings.maxCaptureMB) MB", value: $settings.maxCaptureMB, in: 1...100)
+            Toggle("图片文字识别（OCR 入库，截图内容可搜索）", isOn: $settings.imageOCREnabled)
             HStack(spacing: 6) {
                 Image(systemName: store.supportsFullTextSearch ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
                     .foregroundStyle(store.supportsFullTextSearch ? Color.green : Color.orange)
@@ -148,6 +149,14 @@ private struct AITab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("启用 AI 快速操作（面板内 ⌘K）", isOn: $settings.aiEnabled)
+            Toggle("语义搜索（本地系统模型按含义匹配历史，无网络请求）",
+                   isOn: $settings.semanticSearchEnabled)
+                .disabled(!EmbeddingService.isAvailable)
+            if !EmbeddingService.isAvailable {
+                Text("当前系统未提供可用的句向量资源，语义搜索暂不可用（不影响关键词检索）")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
             Text("端点（任意 OpenAI 兼容 Chat Completions 服务）")
                 .font(.callout)
             TextField("https://api.openai.com/v1 或 http://localhost:11434/v1（Ollama）", text: $settings.aiEndpoint)

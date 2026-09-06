@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// 组装根：初始化各服务并接线。
 final class AppModel {
@@ -12,6 +13,7 @@ final class AppModel {
     let panel: PanelController
     let menuBar: MenuBarController
     let settingsWindow: SettingsWindowController
+    let embeddingBackfill: EmbeddingBackfill?
 
     private var hotkeyObserver: NSObjectProtocol?
     private var retentionTimer: Timer?
@@ -23,7 +25,12 @@ final class AppModel {
         blobStore = BlobStore(directory: base.appendingPathComponent("blobs"))
         settings = AppSettings()
         let database = try Database(url: base.appendingPathComponent("clipmate.sqlite"))
-        store = try ClipStore(database: database, blobStore: blobStore)
+        // 语义搜索开关：开启且系统具备句向量能力时挂载向量生成器
+        let embeddingProvider: ((String) -> Data?)? = settings.semanticSearchEnabled && EmbeddingService.isAvailable
+            ? { EmbeddingService.embed(text: $0) }
+            : nil
+        store = try ClipStore(database: database, blobStore: blobStore, embeddingProvider: embeddingProvider)
+        embeddingBackfill = embeddingProvider == nil ? nil : EmbeddingBackfill(store: store)
         ai = AIService(settings: settings)
         monitor = ClipboardMonitor(settings: settings, store: store)
         frontApps = FrontAppTracker()
@@ -49,6 +56,10 @@ final class AppModel {
             if self.settings.soundOnCapture {
                 NSSound(named: "Tink")?.play()
             }
+            // 新文本条目后台补算语义向量
+            if item.kind == .text || item.kind == .url, !item.plainText.isEmpty {
+                self.embeddingBackfill?.embedIfNeeded(id: item.id, text: item.plainText)
+            }
         }
         monitor.start()
 
@@ -66,6 +77,8 @@ final class AppModel {
         menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
         menuBar.onHistoryChanged = { [weak self] in self?.panel.viewModel.reload() }
         menuBar.onSuppressCapture = { [weak self] in self?.monitor.suppress(seconds: 1.5) }
+        menuBar.onExportHistory = { [weak self] in self?.exportHistory() }
+        menuBar.onImportHistory = { [weak self] in self?.importHistory() }
         menuBar.install()
 
         try? store.enforceRetention(
@@ -79,11 +92,54 @@ final class AppModel {
                 maxAgeDays: self.settings.retentionMaxAgeDays
             )
         }
+        // 存量数据向量补算（后台，低优先级）
+        embeddingBackfill?.backfillAll()
     }
 
     private func applyHotkey() {
         let preset = settings.currentPreset
         hotkey.onHotkey = { [weak self] in self?.panel.togglePanel() }
         hotkey.register(keyCode: preset.keyCode, modifiers: preset.modifiers)
+    }
+
+    // MARK: - 导入导出
+
+    func exportHistory() {
+        let panel = NSSavePanel()
+        panel.title = "导出剪贴板历史"
+        panel.nameFieldStringValue = "clipmate-export.json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try store.exportJSON()
+            try data.write(to: url, options: .atomic)
+            alert("导出完成", "已导出 \(store.itemCount()) 条到 \(url.lastPathComponent)")
+        } catch {
+            alert("导出失败", error.localizedDescription)
+        }
+    }
+
+    func importHistory() {
+        let openPanel = NSOpenPanel()
+        openPanel.title = "导入剪贴板历史"
+        openPanel.allowedContentTypes = [.json]
+        openPanel.canChooseFiles = true
+        openPanel.canChooseDirectories = false
+        guard openPanel.runModal() == .OK, let url = openPanel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let count = try store.importJSON(data)
+            panel.viewModel.reload()
+            alert("导入完成", "新入库 \(count) 条（重复内容已自动跳过）")
+        } catch {
+            alert("导入失败", error.localizedDescription)
+        }
+    }
+
+    private func alert(_ title: String, _ message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 }

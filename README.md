@@ -31,12 +31,20 @@
 - [x] OpenAI 兼容流式 Provider（覆盖 OpenAI / Ollama / LM Studio / 各类兼容网关）
 - [x] 结果三种处置：复制 / 替换为新条目 / 直接粘贴；流式预览可中断
 - [x] API Key 仅存 Keychain；AI 默认关闭，启用需显式配置
+- [x] **语义搜索**：NLEmbedding 本地句向量（零网络），与关键词检索 RRF 混合排序，后台自动补算向量，按含义也能搜到历史
+- [x] **图片 OCR**（Vision，中英混合）：识别文字并入库可检索，可开关
+
+### ✅ v1.1 体验增强
+- [x] **详情预览面板**（`⌘I`）：大图 / 全文 / 文件清单 / 元信息 / OCR 文字，面板内直接复制/粘贴/编辑/入队
+- [x] **粘贴队列**：`⇧⏎` 逐条入队（最多 9 条）→ `⌘⇧⏎` 顺序批量粘贴；无 AX 权限降级为拼接复制
+- [x] **导入导出 JSON**：菜单栏入口，导入自动去重、还原原始时间
+- [x] 数据库迁移机制（user_version，v1→v2 自动加向量列）
 
 ### ⏳ 后续（计划中的 M2/M3 余量与 P2）
-- [ ] Apple Foundation Models 端侧 Provider（macOS 26+）、语义搜索（NLEmbedding/本地 embedding）
-- [ ] 详情预览面板（大图/PDF 首页）、粘贴队列、片段收藏夹
-- [ ] 图片 OCR（Vision）、iCloud 同步、导入导出、多语言、自定义动作脚本
-- [ ] Sparkle 自动更新、Developer ID 公证、Homebrew Cask
+- [ ] Apple Foundation Models 端侧 Provider（需 macOS 26 SDK）
+- [ ] PDF 首页预览、片段收藏夹、自定义动作脚本、多语言
+- [ ] iCloud 同步（需签名与 CloudKit entitlement）
+- [ ] Sparkle 自动更新、Developer ID 公证、Homebrew Cask（需开发者证书）
 
 ## 构建与运行
 

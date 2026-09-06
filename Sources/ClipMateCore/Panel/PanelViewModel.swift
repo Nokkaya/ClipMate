@@ -29,6 +29,10 @@ public final class PanelViewModel: ObservableObject {
     @Published public var showConfirmClear = false
     @Published public var aiState: AIOverlayState?
     @Published public var aiCustomPrompt = ""
+    /// 粘贴队列（会话内有效，按序批量粘贴）。
+    @Published public var queue: [ClipItem] = []
+    /// 详情预览浮层当前条目。
+    @Published public var previewItem: ClipItem?
 
     public let store: ClipStore
     public let settings: AppSettings
@@ -170,12 +174,60 @@ public final class PanelViewModel: ObservableObject {
     public func confirmClearAll() {
         try? store.deleteAll(keepPinned: true)
         showConfirmClear = false
+        queue.removeAll()
         reload()
+    }
+
+    // MARK: - 粘贴队列
+
+    @discardableResult
+    public func toggleQueue(item: ClipItem? = nil) -> Bool {
+        let target = item ?? selectedItem
+        guard let target else { return false }
+        if let index = queue.firstIndex(where: { $0.id == target.id }) {
+            queue.remove(at: index)
+            return false
+        }
+        guard queue.count < 9 else { return false }
+        queue.append(target)
+        return true
+    }
+
+    public func clearQueue() {
+        queue.removeAll()
+    }
+
+    /// 顺序粘贴队列内容，完成后清空队列。
+    public func pasteQueue() {
+        guard !queue.isEmpty else { return }
+        let contents = queue.compactMap { store.pasteboardContent(for: $0) }
+        let target = pasteTarget
+        queue.removeAll()
+        dismiss?()
+        guard !contents.isEmpty else { return }
+        PasteBack.pasteSequence(contents: contents, toPID: target?.processIdentifier) { [weak self] seconds in
+            self?.monitor.suppress(seconds: seconds)
+        }
+        if target == nil || !PasteBack.isAccessibilityGranted() {
+            NSSound(named: "Basso")?.play()
+        }
+    }
+
+    // MARK: - 详情预览
+
+    public func togglePreview(item: ClipItem? = nil) {
+        let target = item ?? selectedItem
+        if previewItem != nil, target == nil || target?.id == previewItem?.id {
+            previewItem = nil
+        } else if let target {
+            previewItem = target
+        }
     }
 
     public func clearTransientState() {
         showEditOverlay = false
         showConfirmClear = false
+        previewItem = nil
         if aiState?.isRunning == true { aiTask?.cancel() }
         aiState = nil
     }

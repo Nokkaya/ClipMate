@@ -125,6 +125,14 @@ final class PanelController {
             if event.keyCode == 53 { viewModel.showConfirmClear = false; return true }
             return false
         }
+        // 预览浮层：Esc/⌘I 关闭，其余放行（文本可选中复制）
+        if viewModel.previewItem != nil {
+            if event.keyCode == 53 || (event.keyCode == 34 && cmdOnly) {
+                viewModel.previewItem = nil
+                return true
+            }
+            return false
+        }
         // AI 浮层：Esc 关闭，其余放行（自定义指令输入框）
         if viewModel.aiState != nil {
             if event.keyCode == 53 { viewModel.closeAI(); return true }
@@ -136,9 +144,17 @@ final class PanelController {
             viewModel.moveSelection(event.keyCode == 125 ? 1 : -1)
             return true
         case 36: // Return
-            if cmdOnly { viewModel.copySelected() }
-            else if flags.contains(.option) { viewModel.beginEdit() }
-            else { viewModel.pasteSelected() }
+            if flags.contains(.command) && flags.contains(.shift) {
+                viewModel.pasteQueue()          // ⌘⇧⏎ 顺序粘贴队列
+            } else if cmdOnly {
+                viewModel.copySelected()        // ⌘⏎ 仅复制
+            } else if flags.contains(.option) {
+                viewModel.beginEdit()           // ⌥⏎ 编辑
+            } else if flags.contains(.shift) {
+                _ = viewModel.toggleQueue()     // ⇧⏎ 加入/移出队列
+            } else {
+                viewModel.pasteSelected()       // ⏎ 粘贴
+            }
             return true
         case 51: // Delete
             if !flags.contains(.command) && !flags.contains(.option) && !flags.contains(.control)
@@ -147,8 +163,10 @@ final class PanelController {
                 return true
             }
             return false
-        case 53: // Esc：先清搜索词，再隐藏
-            if !viewModel.query.isEmpty {
+        case 53: // Esc：预览 → 清搜索词 → 隐藏
+            if viewModel.previewItem != nil {
+                viewModel.previewItem = nil
+            } else if !viewModel.query.isEmpty {
                 viewModel.query = ""
                 viewModel.reload()
             } else {
@@ -160,6 +178,9 @@ final class PanelController {
             return true
         case 35 where cmdOnly: // ⌘P 固定
             viewModel.togglePin()
+            return true
+        case 34 where cmdOnly: // ⌘I 详情预览
+            viewModel.togglePreview()
             return true
         case 40 where cmdOnly: // ⌘K AI
             viewModel.openAI()

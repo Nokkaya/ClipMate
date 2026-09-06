@@ -106,4 +106,41 @@ public enum PasteBack {
             }
         }
     }
+
+    /// 粘贴队列：按顺序逐条粘贴（每条间隔 0.55s），结束后恢复原剪贴板。
+    /// 无目标/无 AX 权限时降级为把全部内容按行拼接写入剪贴板。
+    public static func pasteSequence(contents: [PasteboardContent],
+                                     toPID pid: pid_t?,
+                                     suppress: ((TimeInterval) -> Void)? = nil) {
+        guard !contents.isEmpty else { return }
+        guard let pid, pid > 0, isAccessibilityGranted() else {
+            let texts = contents.compactMap { plainText($0) }
+            if !texts.isEmpty {
+                write(.text(texts.joined(separator: "\n")))
+                suppress?(1.5)
+            }
+            return
+        }
+        let snapshot = snapshotPasteboard()
+        suppress?(2.0 + Double(contents.count))
+        var delay = 0.15
+        for content in contents {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                write(content)
+                _ = pasteToFrontmost(pid: pid)
+            }
+            delay += 0.55
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.4) {
+            if let snapshot { restorePasteboard(snapshot) }
+        }
+    }
+
+    private static func plainText(_ content: PasteboardContent) -> String? {
+        switch content {
+        case .text(let string): return string
+        case .richText(_, let plain): return plain
+        case .image, .files: return nil
+        }
+    }
 }

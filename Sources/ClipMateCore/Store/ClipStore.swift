@@ -1,20 +1,31 @@
 import Foundation
 import CryptoKit
 
-/// 历史存储：SQLite（去重合并、FTS5/LIKE 检索、固定、保留策略、大对象落盘）。
+/// 历史存储：SQLite（去重合并、FTS5/LIKE 检索、语义向量混合排序、固定、保留策略、大对象落盘、导入导出）。
 public final class ClipStore {
     private let db: Database
     private let blobs: BlobStore
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    public init(database: Database, blobStore: BlobStore) throws {
+    /// 语义检索的向量生成器（文本 → 向量二进制）；nil 表示未启用。
+    private let embeddingProvider: ((String) -> Data?)?
+    /// 向量缓存：id → float 数组（懒加载，写操作后失效）。
+    private var embeddingCache: [Int64: [Float]]?
+
+    public init(database: Database,
+                blobStore: BlobStore,
+                embeddingProvider: ((String) -> Data?)? = nil) throws {
         self.db = database
         self.blobs = blobStore
+        self.embeddingProvider = embeddingProvider
         try Migrations.run(database)
     }
 
     public var supportsFullTextSearch: Bool { db.hasFTS5 }
+
+    /// 当前已建立向量的条目数。
+    public var embeddedCount: Int { embeddingVectors().count }
 
     // MARK: - 列
 
@@ -38,7 +49,7 @@ public final class ClipStore {
 
     // MARK: - 采集入库（含去重合并）
 
-    /// 相同内容再次复制时上浮并累加 use_count，不产生新行。
+    /// 相同内容再次复制时上浮并累加 use_count，不产生新行。createdAt 供导入还原原始时间。
     @discardableResult
     public func capture(kind: ClipKind,
                         plainText: String,
@@ -47,7 +58,8 @@ public final class ClipStore {
                         tags: [String] = [],
                         inlineData: Data? = nil,
                         imageOriginal: Data? = nil,
-                        meta: [String: String] = [:]) throws -> (item: ClipItem, isNew: Bool) {
+                        meta: [String: String] = [:],
+                        createdAt: Date? = nil) throws -> (item: ClipItem, isNew: Bool) {
         var meta = meta
         var blobName: String?
         if kind == .image, let original = imageOriginal {
@@ -57,6 +69,7 @@ public final class ClipStore {
 
         let content = kind == .image ? (imageOriginal ?? Data()) : Data(plainText.utf8)
         let hashData = Data(SHA256.hash(data: Data(kind.rawValue.utf8) + content))
+        let timestamp = (createdAt ?? Date()).timeIntervalSince1970
         let now = Date().timeIntervalSince1970
 
         let dup = try db.prepare("SELECT id FROM clip WHERE content_hash = ? LIMIT 1")
@@ -72,7 +85,7 @@ public final class ClipStore {
                 """)
             update.bind([
                 .text(kind.rawValue), .text(plainText), .text(sourceBundle), .text(sourceName),
-                .int(Int64(content.count)), .double(now), .double(now),
+                .int(Int64(content.count)), .double(timestamp), .double(now),
                 .blob(inlineData), .text(blobName), .text(json(meta)),
                 .int(id),
             ])
@@ -88,7 +101,7 @@ public final class ClipStore {
             """)
         insert.bind([
             .text(kind.rawValue), .text(plainText), .text(sourceBundle), .text(sourceName),
-            .blob(hashData), .int(Int64(content.count)), .double(now), .double(now),
+            .blob(hashData), .int(Int64(content.count)), .double(timestamp), .double(timestamp),
             .text(json(tags)), .text(json(meta)), .blob(inlineData), .text(blobName),
         ])
         try insert.run()
@@ -98,38 +111,92 @@ public final class ClipStore {
 
     // MARK: - 查询
 
-    /// 检索：拉丁文走 FTS5 前缀匹配（按相关度），含 CJK 的查询走 LIKE（系统 FTS5 默认分词器不切中文）。
+    /// 检索：文本路径（FTS5 前缀/LIKE）+ 语义向量路径，RRF 混合排序。
+    /// 拉丁文查询走 FTS5，含 CJK 的查询走 LIKE（系统 FTS5 默认分词器不切中文）。
     public func search(query: String, filter: FilterKind = .all, limit: Int = 300) -> [ClipItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            if !trimmed.isEmpty, db.hasFTS5, !containsCJK(trimmed) {
-                let ftsQuery = ftsExpression(for: trimmed)
-                var sql = "SELECT clip.* FROM clip, clip_fts WHERE clip_fts MATCH ? AND clip.id = clip_fts.rowid"
-                if let clause = filter.kindClause { sql += " AND \(clause)" }
-                if filter == .pinned { sql += " AND clip.pinned = 1" }
-                sql += " ORDER BY clip.pinned DESC, rank LIMIT ?"
-                let statement = try db.prepare(sql)
-                statement.bind([.text(ftsQuery), .int(Int64(limit))])
-                return collect(statement)
-            }
+            let textResults = try textSearch(trimmed, filter: filter, limit: limit)
+            guard !trimmed.isEmpty, let provider = embeddingProvider else { return textResults }
 
-            var clauses: [String] = []
-            var args: [SQLValue] = []
-            if !trimmed.isEmpty {
-                clauses.append("plain_text LIKE ?")
-                args.append(.text("%\(trimmed)%"))
+            let vectors = embeddingVectors()
+            guard !vectors.isEmpty else { return textResults }
+
+            // 语义召回：余弦相似度，取 top 2×limit
+            guard let queryData = provider(trimmed),
+                  let queryVector = Self.vectors(from: queryData) else { return textResults }
+            var candidates: [(id: Int64, score: Float)] = []
+            for (id, vector) in vectors where vector.count == queryVector.count {
+                let similarity = Self.cosine(queryVector, vector)
+                if similarity >= 0.28 {
+                    candidates.append((id, similarity))
+                }
             }
-            if let clause = filter.kindClause { clauses.append(clause) }
-            if filter == .pinned { clauses.append("pinned = 1") }
-            var sql = "SELECT * FROM clip"
-            if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
-            sql += " ORDER BY pinned DESC, created_at DESC LIMIT ?"
-            args.append(.int(Int64(limit)))
-            let statement = try db.prepare(sql)
-            statement.bind(args)
-            return collect(statement)
+            guard !candidates.isEmpty else { return textResults }
+            candidates.sort { $0.score > $1.score }
+            let vectorIDs = candidates.prefix(limit * 2).map(\.id)
+
+            // RRF 融合两路排名
+            var scores: [Int64: Double] = [:]
+            for (rank, item) in textResults.enumerated() {
+                scores[item.id, default: 0] += 1.0 / Double(60 + rank)
+            }
+            var itemMap = Dictionary(uniqueKeysWithValues: textResults.map { ($0.id, $0) })
+            for (rank, id) in vectorIDs.enumerated() {
+                scores[id, default: 0] += 1.0 / Double(60 + rank)
+                if itemMap[id] == nil, let fetched = item(id: id), matchesFilter(fetched, filter) {
+                    itemMap[id] = fetched
+                }
+            }
+            return scores
+                .compactMap { id, score -> (ClipItem, Double)? in
+                    itemMap[id].map { ($0, score + ($0.pinned ? 0.002 : 0)) }
+                }
+                .sorted { $0.1 > $1.1 }
+                .prefix(limit)
+                .map(\.0)
         } catch {
             return []
+        }
+    }
+
+    private func textSearch(_ trimmed: String, filter: FilterKind, limit: Int) throws -> [ClipItem] {
+        if !trimmed.isEmpty, db.hasFTS5, !containsCJK(trimmed) {
+            let ftsQuery = ftsExpression(for: trimmed)
+            var sql = "SELECT clip.* FROM clip, clip_fts WHERE clip_fts MATCH ? AND clip.id = clip_fts.rowid"
+            if let clause = filter.kindClause { sql += " AND \(clause)" }
+            if filter == .pinned { sql += " AND clip.pinned = 1" }
+            sql += " ORDER BY clip.pinned DESC, rank LIMIT ?"
+            let statement = try db.prepare(sql)
+            statement.bind([.text(ftsQuery), .int(Int64(limit))])
+            return collect(statement)
+        }
+
+        var clauses: [String] = []
+        var args: [SQLValue] = []
+        if !trimmed.isEmpty {
+            clauses.append("plain_text LIKE ?")
+            args.append(.text("%\(trimmed)%"))
+        }
+        if let clause = filter.kindClause { clauses.append(clause) }
+        if filter == .pinned { clauses.append("pinned = 1") }
+        var sql = "SELECT * FROM clip"
+        if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
+        sql += " ORDER BY pinned DESC, created_at DESC LIMIT ?"
+        args.append(.int(Int64(limit)))
+        let statement = try db.prepare(sql)
+        statement.bind(args)
+        return collect(statement)
+    }
+
+    func matchesFilter(_ item: ClipItem, _ filter: FilterKind) -> Bool {
+        switch filter {
+        case .all: return true
+        case .pinned: return item.pinned
+        case .text: return item.kind == .text || item.kind == .richText
+        case .image: return item.kind == .image
+        case .file: return item.kind == .file
+        case .link: return item.kind == .url
         }
     }
 
@@ -144,6 +211,45 @@ public final class ClipStore {
         return Int(statement.columnInt(0))
     }
 
+    // MARK: - 语义向量
+
+    /// 待补算向量的文本条目（供后台批量补算）。
+    public func itemsNeedingEmbedding(limit: Int = 50) -> [(id: Int64, text: String)] {
+        guard let statement = try? db.prepare("""
+            SELECT id, plain_text FROM clip
+            WHERE embedding IS NULL AND kind IN ('text','url')
+              AND length(plain_text) > 0 AND length(plain_text) < 8000
+            LIMIT ?
+            """) else { return [] }
+        statement.bind([.int(Int64(limit))])
+        var result: [(Int64, String)] = []
+        while statement.step() {
+            result.append((statement.columnInt(0), statement.columnText(1) ?? ""))
+        }
+        return result
+    }
+
+    public func setEmbedding(_ id: Int64, _ data: Data) {
+        guard let statement = try? db.prepare("UPDATE clip SET embedding = ? WHERE id = ?") else { return }
+        statement.bind([.blob(data), .int(id)])
+        try? statement.run()
+        embeddingCache = nil
+    }
+
+    private func embeddingVectors() -> [Int64: [Float]] {
+        if let cache = embeddingCache { return cache }
+        var cache: [Int64: [Float]] = [:]
+        if let statement = try? db.prepare("SELECT id, embedding FROM clip WHERE embedding IS NOT NULL") {
+            while statement.step() {
+                if let data = statement.columnData(1), let vector = Self.vectors(from: data) {
+                    cache[statement.columnInt(0)] = vector
+                }
+            }
+        }
+        embeddingCache = cache
+        return cache
+    }
+
     // MARK: - 变更
 
     public func setPinned(_ id: Int64, _ pinned: Bool) throws {
@@ -152,13 +258,16 @@ public final class ClipStore {
         try statement.run()
     }
 
-    /// 编辑条目文本（富文本场景仅替换纯文本表示）。
+    /// 编辑条目文本（富文本场景仅替换纯文本表示）；文本变化后向量失效待补算。
     public func updateText(_ id: Int64, _ text: String) throws {
         guard let existing = item(id: id) else { return }
         let hashData = Data(SHA256.hash(data: Data(existing.kind.rawValue.utf8) + Data(text.utf8)))
-        let statement = try db.prepare("UPDATE clip SET plain_text = ?, content_hash = ?, byte_size = ? WHERE id = ?")
+        let statement = try db.prepare("""
+            UPDATE clip SET plain_text = ?, content_hash = ?, byte_size = ?, embedding = NULL WHERE id = ?
+            """)
         statement.bind([.text(text), .blob(hashData), .int(Int64(text.utf8.count)), .int(id)])
         try statement.run()
+        embeddingCache = nil
     }
 
     public func delete(_ id: Int64) throws {
@@ -168,11 +277,13 @@ public final class ClipStore {
         let statement = try db.prepare("DELETE FROM clip WHERE id = ?")
         statement.bind([.int(id)])
         try statement.run()
+        embeddingCache = nil
     }
 
     public func deleteAll(keepPinned: Bool) throws {
         let statement = try db.prepare(keepPinned ? "DELETE FROM clip WHERE pinned = 0" : "DELETE FROM clip")
         try statement.run()
+        embeddingCache = nil
         cleanupOrphanBlobs()
     }
 
@@ -192,7 +303,62 @@ public final class ClipStore {
             statement.bind([.int(Int64(maxItems))])
             try statement.run()
         }
+        embeddingCache = nil
         cleanupOrphanBlobs()
+    }
+
+    // MARK: - 导入导出
+
+    struct ExportItem: Codable {
+        var kind: String
+        var plainText: String
+        var sourceBundle: String
+        var sourceName: String
+        var tags: [String]
+        var meta: [String: String]
+        var createdAt: Date
+    }
+
+    struct ExportDocument: Codable {
+        var version: Int
+        var exportedAt: Date
+        var items: [ExportItem]
+    }
+
+    public func exportJSON() throws -> Data {
+        let statement = try db.prepare("SELECT * FROM clip ORDER BY created_at ASC")
+        let items = collect(statement).map { item in
+            ExportItem(kind: item.kind.rawValue, plainText: item.plainText,
+                       sourceBundle: item.sourceBundle, sourceName: item.sourceName,
+                       tags: item.tags, meta: item.meta, createdAt: item.createdAt)
+        }
+        let document = ExportDocument(version: 1, exportedAt: Date(), items: items)
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .secondsSince1970
+        defer { encoder.outputFormatting = [] }
+        return try encoder.encode(document)
+    }
+
+    /// 导入（逐条走 capture 去重），返回新入库条数。
+    public func importJSON(_ data: Data) throws -> Int {
+        decoder.dateDecodingStrategy = .secondsSince1970
+        defer { decoder.dateDecodingStrategy = .deferredToDate }
+        let document: ExportDocument
+        do {
+            document = try decoder.decode(ExportDocument.self, from: data)
+        } catch {
+            throw StoreError.sql("文件格式不正确：\(error.localizedDescription)")
+        }
+        var imported = 0
+        for entry in document.items {
+            guard let kind = ClipKind(rawValue: entry.kind) else { continue }
+            let result = try capture(kind: kind, plainText: entry.plainText,
+                                     sourceBundle: entry.sourceBundle, sourceName: entry.sourceName,
+                                     tags: entry.tags, meta: entry.meta,
+                                     createdAt: entry.createdAt)
+            if result.isNew { imported += 1 }
+        }
+        return imported
     }
 
     // MARK: - 粘贴内容装配
@@ -290,5 +456,32 @@ public final class ClipStore {
         for name in blobs.allNames() where !referenced.contains(name) {
             blobs.remove(name)
         }
+    }
+
+    // MARK: - 向量编解码与相似度
+
+    public static func data(from vector: [Double]) -> Data {
+        let floats = vector.map(Float.init)
+        return floats.withUnsafeBufferPointer { Data(buffer: $0) }
+    }
+
+    public static func vectors(from data: Data) -> [Float]? {
+        guard !data.isEmpty, data.count % MemoryLayout<Float>.size == 0 else { return nil }
+        return data.withUnsafeBytes { raw in
+            Array(raw.bindMemory(to: Float.self))
+        }
+    }
+
+    public static func cosine(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var dot: Float = 0, normA: Float = 0, normB: Float = 0
+        for i in 0..<a.count {
+            dot += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
+        }
+        let denominator = (normA * normB).squareRoot()
+        guard denominator > 0 else { return 0 }
+        return dot / denominator
     }
 }

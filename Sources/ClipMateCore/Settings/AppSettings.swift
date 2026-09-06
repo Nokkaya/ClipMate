@@ -68,6 +68,12 @@ public final class AppSettings: ObservableObject {
     @Published public var aiModel: String {
         didSet { defaults.set(aiModel, forKey: "aiModel") }
     }
+    @Published public var imageOCREnabled: Bool {
+        didSet { defaults.set(imageOCREnabled, forKey: "imageOCREnabled") }
+    }
+    @Published public var semanticSearchEnabled: Bool {
+        didSet { defaults.set(semanticSearchEnabled, forKey: "semanticSearchEnabled") }
+    }
 
     /// API Key 只进 Keychain，不落 UserDefaults。
     public var aiAPIKey: String {
@@ -95,6 +101,8 @@ public final class AppSettings: ObservableObject {
             "aiEnabled": false,
             "aiEndpoint": "https://api.openai.com/v1",
             "aiModel": "gpt-4o-mini",
+            "imageOCREnabled": true,
+            "semanticSearchEnabled": true,
         ])
         hotkeyPresetID = defaults.string(forKey: "hotkeyPresetID") ?? "cmdShiftV"
         retentionMaxItems = defaults.integer(forKey: "retentionMaxItems")
@@ -107,6 +115,8 @@ public final class AppSettings: ObservableObject {
         aiEnabled = defaults.bool(forKey: "aiEnabled")
         aiEndpoint = defaults.string(forKey: "aiEndpoint") ?? "https://api.openai.com/v1"
         aiModel = defaults.string(forKey: "aiModel") ?? "gpt-4o-mini"
+        imageOCREnabled = defaults.object(forKey: "imageOCREnabled") as? Bool ?? true
+        semanticSearchEnabled = defaults.object(forKey: "semanticSearchEnabled") as? Bool ?? true
     }
 
     private func applyLaunchAtLogin() {

@@ -2,6 +2,7 @@ import Foundation
 
 enum Migrations {
     static func run(_ db: Database) throws {
+        // v1：基础表
         try db.execute("""
         CREATE TABLE IF NOT EXISTS clip (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,6 +42,19 @@ enum Migrations {
             END;
             """)
         }
-        try db.execute("PRAGMA user_version = 1;")
+
+        // v2：语义搜索向量列（float32 数组）
+        if db.userVersion < 2, !columnExists(db, table: "clip", column: "embedding") {
+            try db.execute("ALTER TABLE clip ADD COLUMN embedding BLOB")
+        }
+        try db.execute("PRAGMA user_version = 2;")
+    }
+
+    private static func columnExists(_ db: Database, table: String, column: String) -> Bool {
+        guard let statement = try? db.prepare("PRAGMA table_info(\(table))") else { return false }
+        while statement.step() {
+            if statement.columnText(1) == column { return true }
+        }
+        return false
     }
 }

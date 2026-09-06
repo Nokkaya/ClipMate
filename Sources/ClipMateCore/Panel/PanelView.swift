@@ -10,6 +10,7 @@ struct PanelView: View {
             mainContent
             if viewModel.showEditOverlay { EditOverlay(viewModel: viewModel) }
             if viewModel.showConfirmClear { ConfirmClearOverlay(viewModel: viewModel) }
+            if viewModel.previewItem != nil { PreviewOverlay(viewModel: viewModel) }
             if viewModel.aiState != nil { AIOverlayView(viewModel: viewModel) }
         }
         .frame(width: 660, height: 480)
@@ -115,6 +116,24 @@ struct FilterChips: View {
                 .foregroundStyle(viewModel.filter == kind ? Color.accentColor : Color.secondary)
             }
             Spacer()
+            if !viewModel.queue.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "list.number")
+                    Text("队列 \(viewModel.queue.count)")
+                    Button {
+                        viewModel.clearQueue()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 9))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                .help("按 ⌘⇧⏎ 顺序粘贴队列内容")
+            }
             if settings.pauseCapture {
                 Label("已暂停采集", systemImage: "pause.circle.fill")
                     .font(.system(size: 11))
@@ -177,6 +196,10 @@ struct ContextMenuItems: View {
         if item.kind != .image {
             Button("编辑…") { viewModel.beginEdit(item: item) }
         }
+        Button("详情预览") { viewModel.togglePreview(item: item) }
+        Button(viewModel.queue.contains { $0.id == item.id } ? "移出粘贴队列" : "加入粘贴队列") {
+            _ = viewModel.toggleQueue(item: item)
+        }
         Button("AI 操作…") { viewModel.openAI(item: item) }
         Divider()
         Button("删除", role: .destructive) { viewModel.delete(item: item) }
@@ -211,10 +234,10 @@ struct FooterBar: View {
         HStack(spacing: 12) {
             KeyHint("⏎", "粘贴")
             KeyHint("⌘⏎", "复制")
-            KeyHint("⌥⏎", "编辑")
+            KeyHint("⌘I", "预览")
+            KeyHint("⇧⏎", "入队")
+            KeyHint("⌘⇧⏎", "连贴")
             KeyHint("⌘K", "AI")
-            KeyHint("⌘1-9", "快贴")
-            KeyHint("Tab", "分类")
             KeyHint("⌫", "删除")
             Spacer()
             KeyHint("Esc", "隐藏")

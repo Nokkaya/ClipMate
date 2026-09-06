@@ -151,4 +151,10 @@ public final class Database {
     }
 
     public var lastInsertRowID: Int64 { sqlite3_last_insert_rowid(handle) }
+
+    /// PRAGMA user_version（schema 版本号）。
+    public var userVersion: Int {
+        guard let statement = try? prepare("PRAGMA user_version"), statement.step() else { return 0 }
+        return Int(statement.columnInt(0))
+    }
 }
