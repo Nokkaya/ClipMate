@@ -1,0 +1,120 @@
+import Foundation
+import Combine
+import ServiceManagement
+import Carbon.HIToolbox
+
+public struct HotkeyPreset: Identifiable, Equatable {
+    public let id: String
+    public let keyCode: UInt32
+    public let modifiers: UInt32
+    public let display: String
+}
+
+/// 应用设置（UserDefaults 持久化；API Key 走 Keychain）。
+public final class AppSettings: ObservableObject {
+    public static let hotkeyChangedNotification = Notification.Name("clipmate.hotkeyChanged")
+
+    public static let hotkeyPresets: [HotkeyPreset] = [
+        HotkeyPreset(id: "cmdShiftV", keyCode: UInt32(kVK_ANSI_V),
+                     modifiers: UInt32(cmdKey) | UInt32(shiftKey), display: "⌘⇧V"),
+        HotkeyPreset(id: "cmdOptV", keyCode: UInt32(kVK_ANSI_V),
+                     modifiers: UInt32(cmdKey) | UInt32(optionKey), display: "⌘⌥V"),
+        HotkeyPreset(id: "ctrlOptV", keyCode: UInt32(kVK_ANSI_V),
+                     modifiers: UInt32(controlKey) | UInt32(optionKey), display: "⌃⌥V"),
+        HotkeyPreset(id: "f9", keyCode: UInt32(kVK_F9), modifiers: 0, display: "F9"),
+    ]
+
+    /// 内置敏感应用黑名单（可由用户增删）。
+    public static let defaultExcludedApps = [
+        "com.1password.1password",
+        "com.apple.keychainaccess",
+        "com.bitwarden.desktop",
+        "io.github.keepassxc.KeePassXC",
+    ]
+
+    private let defaults: UserDefaults
+
+    @Published public var hotkeyPresetID: String {
+        didSet { defaults.set(hotkeyPresetID, forKey: "hotkeyPresetID")
+            NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil) }
+    }
+    @Published public var retentionMaxItems: Int {
+        didSet { defaults.set(retentionMaxItems, forKey: "retentionMaxItems") }
+    }
+    @Published public var retentionMaxAgeDays: Int {
+        didSet { defaults.set(retentionMaxAgeDays, forKey: "retentionMaxAgeDays") }
+    }
+    @Published public var maxCaptureMB: Int {
+        didSet { defaults.set(maxCaptureMB, forKey: "maxCaptureMB") }
+    }
+    @Published public var excludedApps: [String] {
+        didSet { defaults.set(excludedApps, forKey: "excludedApps") }
+    }
+    @Published public var soundOnCapture: Bool {
+        didSet { defaults.set(soundOnCapture, forKey: "soundOnCapture") }
+    }
+    @Published public var launchAtLogin: Bool {
+        didSet { defaults.set(launchAtLogin, forKey: "launchAtLogin"); applyLaunchAtLogin() }
+    }
+    @Published public var pauseCapture: Bool {
+        didSet { defaults.set(pauseCapture, forKey: "pauseCapture") }
+    }
+    @Published public var aiEnabled: Bool {
+        didSet { defaults.set(aiEnabled, forKey: "aiEnabled") }
+    }
+    @Published public var aiEndpoint: String {
+        didSet { defaults.set(aiEndpoint, forKey: "aiEndpoint") }
+    }
+    @Published public var aiModel: String {
+        didSet { defaults.set(aiModel, forKey: "aiModel") }
+    }
+
+    /// API Key 只进 Keychain，不落 UserDefaults。
+    public var aiAPIKey: String {
+        get { KeychainStore.string(forKey: "aiAPIKey") ?? "" }
+        set { try? KeychainStore.setString(newValue, forKey: "aiAPIKey") }
+    }
+
+    public var maxCaptureBytes: Int { maxCaptureMB * 1024 * 1024 }
+
+    public var currentPreset: HotkeyPreset {
+        Self.hotkeyPresets.first { $0.id == hotkeyPresetID } ?? Self.hotkeyPresets[0]
+    }
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        defaults.register(defaults: [
+            "hotkeyPresetID": "cmdShiftV",
+            "retentionMaxItems": 1000,
+            "retentionMaxAgeDays": 30,
+            "maxCaptureMB": 20,
+            "excludedApps": Self.defaultExcludedApps,
+            "soundOnCapture": false,
+            "launchAtLogin": false,
+            "pauseCapture": false,
+            "aiEnabled": false,
+            "aiEndpoint": "https://api.openai.com/v1",
+            "aiModel": "gpt-4o-mini",
+        ])
+        hotkeyPresetID = defaults.string(forKey: "hotkeyPresetID") ?? "cmdShiftV"
+        retentionMaxItems = defaults.integer(forKey: "retentionMaxItems")
+        retentionMaxAgeDays = defaults.integer(forKey: "retentionMaxAgeDays")
+        maxCaptureMB = defaults.integer(forKey: "maxCaptureMB")
+        excludedApps = defaults.array(forKey: "excludedApps") as? [String] ?? Self.defaultExcludedApps
+        soundOnCapture = defaults.bool(forKey: "soundOnCapture")
+        launchAtLogin = defaults.bool(forKey: "launchAtLogin")
+        pauseCapture = defaults.bool(forKey: "pauseCapture")
+        aiEnabled = defaults.bool(forKey: "aiEnabled")
+        aiEndpoint = defaults.string(forKey: "aiEndpoint") ?? "https://api.openai.com/v1"
+        aiModel = defaults.string(forKey: "aiModel") ?? "gpt-4o-mini"
+    }
+
+    private func applyLaunchAtLogin() {
+        // 未打包成 .app（swift run 开发模式）时注册会失败，静默忽略。
+        if launchAtLogin {
+            try? SMAppService.mainApp.register()
+        } else {
+            try? SMAppService.mainApp.unregister()
+        }
+    }
+}
