@@ -9,6 +9,7 @@ extension ClipKind {
         case .richText: return "doc.richtext"
         case .image: return "photo"
         case .file: return "folder"
+        case .pdf: return "doc.text"
         }
     }
 
@@ -19,6 +20,7 @@ extension ClipKind {
         case .richText: return Palette.richText
         case .image: return Palette.image
         case .file: return Palette.file
+        case .pdf: return Palette.pdf
         }
     }
 }

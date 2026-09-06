@@ -12,6 +12,7 @@ public enum AutoTagger {
         case .file: return ["文件"]
         case .richText: return ["富文本"]
         case .url: return ["链接"]
+        case .pdf: return ["PDF"]
         case .text: return textTags(for: text)
         }
     }

@@ -18,6 +18,8 @@ struct SettingsView: View {
                 .tabItem { Label("隐私", systemImage: "hand.raised") }
             AITab(settings: settings, ai: ai)
                 .tabItem { Label("AI", systemImage: "sparkles") }
+            ScriptsTab(settings: settings)
+                .tabItem { Label("脚本", systemImage: "terminal") }
             AboutTab()
                 .tabItem { Label("关于", systemImage: "info.circle") }
         }
@@ -200,6 +202,71 @@ private struct AITab: View {
         }
         .padding()
         .onAppear { apiKeyDraft = settings.aiAPIKey }
+    }
+}
+
+// MARK: - 脚本
+
+private struct ScriptsTab: View {
+    @ObservedObject var settings: AppSettings
+    @State private var newName = ""
+    @State private var newCommand = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("脚本动作显示在 ⌘K 浮层：剪贴板文本经 stdin 传入命令，stdout 作为结果。命令以你的用户权限运行，请勿填入不可信脚本。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            List {
+                ForEach(settings.customScripts) { script in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(script.name)
+                                .font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            Button {
+                                settings.customScripts.removeAll { $0.id == script.id }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Text(script.command)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+            .listStyle(.inset)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+            .frame(minHeight: 150)
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("名称，如：提取邮箱", text: $newName)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("命令，如：grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+'", text: $newCommand)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11, design: .monospaced))
+                    HStack {
+                        Spacer()
+                        Button("添加脚本") {
+                            let name = newName.trimmingCharacters(in: .whitespaces)
+                            let command = newCommand.trimmingCharacters(in: .whitespaces)
+                            guard !name.isEmpty, !command.isEmpty else { return }
+                            settings.customScripts.append(ScriptAction(name: name, command: command))
+                            newName = ""
+                            newCommand = ""
+                        }
+                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty
+                                  || newCommand.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .padding()
     }
 }
 

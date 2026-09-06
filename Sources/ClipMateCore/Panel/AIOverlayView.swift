@@ -55,6 +55,20 @@ struct AIOverlayView: View {
                 .buttonStyle(.bordered)
                 .disabled(state.isRunning)
             }
+            if !viewModel.settings.customScripts.isEmpty {
+                ForEach(viewModel.settings.customScripts) { script in
+                    Button {
+                        viewModel.runScript(script)
+                    } label: {
+                        Label(script.name, systemImage: "terminal")
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(state.isRunning)
+                }
+            }
         }
     }
 

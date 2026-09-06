@@ -62,12 +62,12 @@ public final class ClipStore {
                         createdAt: Date? = nil) throws -> (item: ClipItem, isNew: Bool) {
         var meta = meta
         var blobName: String?
-        if kind == .image, let original = imageOriginal {
+        if kind == .image || kind == .pdf, let original = imageOriginal {
             blobName = try blobs.store(original)
             meta["bytes"] = String(original.count)
         }
 
-        let content = kind == .image ? (imageOriginal ?? Data()) : Data(plainText.utf8)
+        let content = (kind == .image || kind == .pdf) ? (imageOriginal ?? Data()) : Data(plainText.utf8)
         let hashData = Data(SHA256.hash(data: Data(kind.rawValue.utf8) + content))
         let timestamp = (createdAt ?? Date()).timeIntervalSince1970
         let now = Date().timeIntervalSince1970
@@ -165,6 +165,7 @@ public final class ClipStore {
             let ftsQuery = ftsExpression(for: trimmed)
             var sql = "SELECT clip.* FROM clip, clip_fts WHERE clip_fts MATCH ? AND clip.id = clip_fts.rowid"
             if let clause = filter.kindClause { sql += " AND \(clause)" }
+            if let extra = filter.extraClause { sql += " AND \(extra)" }
             if filter == .pinned { sql += " AND clip.pinned = 1" }
             sql += " ORDER BY clip.pinned DESC, rank LIMIT ?"
             let statement = try db.prepare(sql)
@@ -179,6 +180,7 @@ public final class ClipStore {
             args.append(.text("%\(trimmed)%"))
         }
         if let clause = filter.kindClause { clauses.append(clause) }
+        if let extra = filter.extraClause { clauses.append(extra) }
         if filter == .pinned { clauses.append("pinned = 1") }
         var sql = "SELECT * FROM clip"
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
@@ -193,7 +195,8 @@ public final class ClipStore {
         switch filter {
         case .all: return true
         case .pinned: return item.pinned
-        case .text: return item.kind == .text || item.kind == .richText
+        case .snippet: return item.tags.contains(FilterKind.snippetTag)
+        case .text: return item.kind == .text || item.kind == .richText || item.kind == .pdf
         case .image: return item.kind == .image
         case .file: return item.kind == .file
         case .link: return item.kind == .url
@@ -255,6 +258,21 @@ public final class ClipStore {
     public func setPinned(_ id: Int64, _ pinned: Bool) throws {
         let statement = try db.prepare("UPDATE clip SET pinned = ? WHERE id = ?")
         statement.bind([.int(pinned ? 1 : 0), .int(id)])
+        try statement.run()
+    }
+
+    /// 增删条目标签（片段收藏即基于标签实现）。
+    public func mutateTag(_ id: Int64, tag: String, add: Bool) throws {
+        guard let item = item(id: id) else { return }
+        var tags = item.tags
+        if add {
+            guard !tags.contains(tag) else { return }
+            tags.append(tag)
+        } else {
+            tags.removeAll { $0 == tag }
+        }
+        let statement = try db.prepare("UPDATE clip SET tags = ? WHERE id = ?")
+        statement.bind([.text(json(tags)), .int(id)])
         try statement.run()
     }
 
@@ -374,6 +392,10 @@ public final class ClipStore {
             guard let name = item.blobName,
                   let data = try? Data(contentsOf: blobs.url(for: name)) else { return nil }
             return .image(data: data)
+        case .pdf:
+            guard let name = item.blobName,
+                  let data = try? Data(contentsOf: blobs.url(for: name)) else { return nil }
+            return .pdf(data: data, plain: item.plainText)
         case .file:
             let urls = item.plainText
                 .components(separatedBy: "\n")

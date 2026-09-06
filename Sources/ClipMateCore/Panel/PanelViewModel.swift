@@ -224,6 +224,45 @@ public final class PanelViewModel: ObservableObject {
         }
     }
 
+    // MARK: - 片段收藏（标签驱动）
+
+    @discardableResult
+    public func toggleSnippet(item: ClipItem? = nil) -> Bool {
+        let target = item ?? selectedItem
+        guard let target else { return false }
+        let isSnippet = target.tags.contains(FilterKind.snippetTag)
+        try? store.mutateTag(target.id, tag: FilterKind.snippetTag, add: !isSnippet)
+        reload()
+        return !isSnippet
+    }
+
+    // MARK: - 自定义脚本
+
+    public func runScript(_ script: ScriptAction) {
+        guard var state = aiState else { return }
+        let content = state.item.plainText
+        state.output = ""
+        state.isRunning = true
+        state.finished = false
+        state.errorText = nil
+        aiState = state
+        aiTask?.cancel()
+        aiTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let output = try await ScriptRunner.run(script, input: content)
+                if self.aiState?.isRunning == true {
+                    self.aiState?.output = output
+                    self.aiState?.isRunning = false
+                    self.aiState?.finished = true
+                }
+            } catch {
+                self.aiState?.isRunning = false
+                self.aiState?.errorText = "脚本失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
     public func clearTransientState() {
         showEditOverlay = false
         showConfirmClear = false

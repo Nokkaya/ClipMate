@@ -37,7 +37,10 @@ public struct ClipItem: Identifiable, Equatable {
 
 /// 列表过滤维度（对应 UI 上的分类 chip）。
 public enum FilterKind: String, CaseIterable {
-    case all, text, image, file, link, pinned
+    case all, text, image, file, link, snippet, pinned
+
+    /// 片段收藏的标记标签。
+    public static let snippetTag = "片段"
 
     public var title: String {
         switch self {
@@ -46,6 +49,7 @@ public enum FilterKind: String, CaseIterable {
         case .image: return "图片"
         case .file: return "文件"
         case .link: return "链接"
+        case .snippet: return "片段"
         case .pinned: return "已固定"
         }
     }
@@ -53,11 +57,19 @@ public enum FilterKind: String, CaseIterable {
     /// 映射到 SQL 的 kind 过滤子句；nil 表示不过滤。
     var kindClause: String? {
         switch self {
-        case .all, .pinned: return nil
-        case .text: return "kind IN ('text','richText')"
+        case .all, .pinned, .snippet: return nil
+        case .text: return "kind IN ('text','richText','pdf')"
         case .image: return "kind = 'image'"
         case .file: return "kind = 'file'"
         case .link: return "kind = 'url'"
+        }
+    }
+
+    /// 非 kind 维度的附加 SQL 子句。
+    var extraClause: String? {
+        switch self {
+        case .snippet: return "tags LIKE '%\"\(FilterKind.snippetTag)\"%'"
+        default: return nil
         }
     }
 }

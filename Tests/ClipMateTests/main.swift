@@ -46,6 +46,25 @@ func makeTempStore() throws -> (store: ClipStore, dir: URL) {
     return (store, dir)
 }
 
+func makeTestPDF(text: String) -> Data? {
+    let data = NSMutableData()
+    guard let consumer = CGDataConsumer(data: data as CFMutableData) else { return nil }
+    var mediaBox = CGRect(x: 0, y: 0, width: 320, height: 120)
+    guard let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else { return nil }
+    context.beginPDFPage(nil as CFDictionary?)
+    NSGraphicsContext.saveGraphicsState()
+    let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
+    NSGraphicsContext.current = nsContext
+    (text as NSString).draw(
+        at: NSPoint(x: 24, y: 60),
+        withAttributes: [.font: NSFont.systemFont(ofSize: 18), .foregroundColor: NSColor.black]
+    )
+    NSGraphicsContext.restoreGraphicsState()
+    context.endPDFPage()
+    context.closePDF()
+    return data as Data
+}
+
 let runner = TestRunner()
 
 runner.run("基础采集与计数") {
@@ -299,6 +318,68 @@ runner.run("图片 OCR（Vision 可用时）") {
         return
     }
     runner.expectTrue(text.contains("CLIPMATE"), "OCR 应识别出 CLIPMATE，实际：\(text.prefix(40))")
+}
+
+runner.run("PDF 采集、落盘与检索") {
+    guard let pdfData = makeTestPDF(text: "CLIPMATE PDF TEST") else {
+        runner.expectTrue(false, "生成测试 PDF 失败")
+        return
+    }
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    // 模拟真实采集管线：首页缩略图由 ClipboardReader 经 PDFHelper 生成后传入
+    let thumbnail = PDFHelper.firstPageThumbnail(from: pdfData, maxPixel: 512)
+    runner.expectTrue(thumbnail != nil, "首页缩略图应能渲染")
+    let captured = try store.capture(
+        kind: .pdf, plainText: "CLIPMATE PDF TEST", sourceBundle: "com.apple.preview", sourceName: "预览",
+        inlineData: thumbnail, imageOriginal: pdfData, meta: ["display": "PDF · 1 页"]
+    )
+    runner.expectTrue(captured.item.blobName != nil, "PDF 应落盘")
+    runner.expectTrue(captured.item.inlineData != nil, "应有首页缩略图")
+    guard case .pdf(let data, _)? = store.pasteboardContent(for: captured.item) else {
+        runner.expectTrue(false, "PDF 应装配为 .pdf 粘贴内容")
+        return
+    }
+    runner.expectEqual(data.count, pdfData.count, "PDF 字节一致")
+    runner.expectTrue(!store.search(query: "CLIPMATE", filter: .all, limit: 10).isEmpty, "PDF 文本可检索")
+    let textFiltered = store.search(query: "", filter: .text, limit: 10)
+    runner.expectTrue(textFiltered.contains { $0.id == captured.item.id }, "PDF 归入文本分类过滤")
+}
+
+runner.run("片段收藏过滤") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let a = try store.capture(kind: .text, plainText: "snippet hello", sourceBundle: "a", sourceName: "A")
+    _ = try store.capture(kind: .text, plainText: "plain other", sourceBundle: "a", sourceName: "A")
+    try store.mutateTag(a.item.id, tag: FilterKind.snippetTag, add: true)
+    let snippets = store.search(query: "", filter: .snippet, limit: 10)
+    runner.expectEqual(snippets.count, 1, "片段过滤只含收藏条目")
+    runner.expectEqual(snippets.first?.id, a.item.id, "收藏条目命中")
+    try store.mutateTag(a.item.id, tag: FilterKind.snippetTag, add: false)
+    runner.expectTrue(store.search(query: "", filter: .snippet, limit: 10).isEmpty, "移出片段后过滤为空")
+}
+
+runner.run("自定义脚本执行（stdin/stdout）") {
+    let script = ScriptAction(name: "upper", command: "tr a-z A-Z")
+    var result: Result<String, Error>?
+    let semaphore = DispatchSemaphore(value: 0)
+    Task {
+        do {
+            result = .success(try await ScriptRunner.run(script, input: "clipmate"))
+        } catch {
+            result = .failure(error)
+        }
+        semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .now() + 15)
+    switch result {
+    case .success(let output):
+        runner.expectEqual(output, "CLIPMATE", "文本经 stdin 转换后输出")
+    case .failure(let error):
+        runner.expectTrue(false, "脚本执行失败：\(error.localizedDescription)")
+    case nil:
+        runner.expectTrue(false, "脚本未在超时内返回")
+    }
 }
 
 print("----")

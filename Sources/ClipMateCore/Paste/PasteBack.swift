@@ -8,6 +8,7 @@ public enum PasteboardContent {
     case richText(rtf: Data, plain: String)
     case image(data: Data)
     case files([URL])
+    case pdf(data: Data, plain: String)
 }
 
 /// 粘贴回写：写剪贴板 → 对前台应用合成 ⌘V → 恢复原剪贴板（不污染用户剪贴板）。
@@ -51,6 +52,10 @@ public enum PasteBack {
         case .files(let urls):
             pb.declareTypes([ownedMarker], owner: nil)
             pb.writeObjects(urls.map { $0 as NSURL })
+        case .pdf(let data, let plain):
+            pb.declareTypes([ownedMarker, .pdf, .string], owner: nil)
+            pb.setData(data, forType: .pdf)
+            if !plain.isEmpty { pb.setString(plain, forType: .string) }
         }
     }
 
@@ -140,6 +145,7 @@ public enum PasteBack {
         switch content {
         case .text(let string): return string
         case .richText(_, let plain): return plain
+        case .pdf(_, let plain): return plain
         case .image, .files: return nil
         }
     }

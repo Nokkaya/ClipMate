@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import Vision
+import PDFKit
 
 /// 从 NSPasteboard 读出的一次采集内容（格式优先级：文件 URL > 图片 > 富文本 > 纯文本）。
 public struct CapturedContent {
@@ -20,10 +21,35 @@ public enum ClipboardReader {
         if types.contains(PasteBack.ownedMarker) { return nil }
 
         if let content = readFileURLs(pb: pb) { return content }
+        if let content = readPDF(pb: pb, maxBytes: maxBytes) { return content }
         if let content = readImage(pb: pb, maxBytes: maxBytes, ocrEnabled: ocrEnabled) { return content }
         if let content = readRichText(pb: pb, maxBytes: maxBytes) { return content }
         if let content = readPlainText(pb: pb, maxBytes: maxBytes) { return content }
         return nil
+    }
+
+    /// PDF：首页缩略图 + 全文提取（可检索）。
+    private static func readPDF(pb: NSPasteboard, maxBytes: Int) -> CapturedContent? {
+        let types = pb.types ?? []
+        guard types.contains(.pdf),
+              let data = pb.data(forType: .pdf), !data.isEmpty, data.count <= maxBytes else { return nil }
+        guard let thumbnail = PDFHelper.firstPageThumbnail(from: data, maxPixel: 512) else { return nil }
+
+        var meta: [String: String] = [:]
+        var extracted = ""
+        if let document = PDFDocument(data: data) {
+            meta["display"] = "PDF · \(document.pageCount) 页"
+            extracted = String((document.string ?? "").prefix(4000))
+        }
+
+        return CapturedContent(
+            kind: .pdf,
+            plainText: extracted,
+            tags: AutoTagger.tags(for: "", kind: .pdf),
+            inlineData: thumbnail,
+            imageOriginal: data,
+            meta: meta
+        )
     }
 
     private static func readFileURLs(pb: NSPasteboard) -> CapturedContent? {

@@ -193,6 +193,9 @@ struct ContextMenuItems: View {
         Button("粘贴") { viewModel.paste(item: item) }
         Button("复制") { viewModel.copy(item: item) }
         Button(item.pinned ? "取消固定" : "固定 ★") { viewModel.togglePin(item) }
+        Button(item.tags.contains(FilterKind.snippetTag) ? "移出片段" : "存为片段") {
+            viewModel.toggleSnippet(item: item)
+        }
         if item.kind != .image {
             Button("编辑…") { viewModel.beginEdit(item: item) }
         }

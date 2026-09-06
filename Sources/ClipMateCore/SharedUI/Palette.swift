@@ -23,6 +23,8 @@ enum Palette {
     static let image = adaptive(light: 0xA45DC8, dark: 0xC99BE8)
     /// 文件类型：琥珀
     static let file = adaptive(light: 0xC07A17, dark: 0xE5B05E)
+    /// PDF 类型：砖红
+    static let pdf = adaptive(light: 0xC24A56, dark: 0xE58A94)
 
     /// 固定标记。
     static let pin = Color.orange

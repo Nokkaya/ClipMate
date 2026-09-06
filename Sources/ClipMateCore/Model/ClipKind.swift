@@ -7,6 +7,7 @@ public enum ClipKind: String, CaseIterable, Codable {
     case richText
     case image
     case file
+    case pdf
 
     public var title: String {
         switch self {
@@ -15,6 +16,7 @@ public enum ClipKind: String, CaseIterable, Codable {
         case .richText: return "富文本"
         case .image: return "图片"
         case .file: return "文件"
+        case .pdf: return "PDF"
         }
     }
 }

@@ -10,6 +10,19 @@ public struct HotkeyPreset: Identifiable, Equatable {
     public let display: String
 }
 
+/// 用户自定义脚本动作：剪贴板文本经 stdin 传入命令，stdout 作为结果。
+public struct ScriptAction: Codable, Identifiable, Equatable {
+    public var id: String
+    public var name: String
+    public var command: String
+
+    public init(id: String = UUID().uuidString, name: String, command: String) {
+        self.id = id
+        self.name = name
+        self.command = command
+    }
+}
+
 /// 应用设置（UserDefaults 持久化；API Key 走 Keychain）。
 public final class AppSettings: ObservableObject {
     public static let hotkeyChangedNotification = Notification.Name("clipmate.hotkeyChanged")
@@ -74,6 +87,13 @@ public final class AppSettings: ObservableObject {
     @Published public var semanticSearchEnabled: Bool {
         didSet { defaults.set(semanticSearchEnabled, forKey: "semanticSearchEnabled") }
     }
+    @Published public var customScripts: [ScriptAction] {
+        didSet {
+            if let data = try? JSONEncoder().encode(customScripts) {
+                defaults.set(data, forKey: "customScripts")
+            }
+        }
+    }
 
     /// API Key 只进 Keychain，不落 UserDefaults。
     public var aiAPIKey: String {
@@ -117,6 +137,11 @@ public final class AppSettings: ObservableObject {
         aiModel = defaults.string(forKey: "aiModel") ?? "gpt-4o-mini"
         imageOCREnabled = defaults.object(forKey: "imageOCREnabled") as? Bool ?? true
         semanticSearchEnabled = defaults.object(forKey: "semanticSearchEnabled") as? Bool ?? true
+        if let scriptData = defaults.data(forKey: "customScripts") {
+            customScripts = (try? JSONDecoder().decode([ScriptAction].self, from: scriptData)) ?? []
+        } else {
+            customScripts = []
+        }
     }
 
     private func applyLaunchAtLogin() {

@@ -40,11 +40,17 @@
 - [x] **导入导出 JSON**：菜单栏入口，导入自动去重、还原原始时间
 - [x] 数据库迁移机制（user_version，v1→v2 自动加向量列）
 
+### ✅ v1.2 格式与自动化
+- [x] **PDF 支持**：复制 PDF 自动采集（首页缩略图 + PDFKit 全文提取可检索），预览面板看首页，粘贴保留 PDF 格式
+- [x] **片段收藏夹**：右键"存为片段"，分类 chip 一键过滤常用片段
+- [x] **自定义脚本动作**：设置 → 脚本 添加命令（文本经 stdin 传入、stdout 作为结果），⌘K 浮层直接执行，10s 超时保护
+- [x] 分类过滤完善：PDF 归入文本类，7 个分类 chip
+
 ### ⏳ 后续（计划中的 M2/M3 余量与 P2）
 - [ ] Apple Foundation Models 端侧 Provider（需 macOS 26 SDK）
-- [ ] PDF 首页预览、片段收藏夹、自定义动作脚本、多语言
 - [ ] iCloud 同步（需签名与 CloudKit entitlement）
 - [ ] Sparkle 自动更新、Developer ID 公证、Homebrew Cask（需开发者证书）
+- [ ] 多语言（i18n）、批量多选删除
 
 ## 构建与运行
 

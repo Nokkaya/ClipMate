@@ -66,7 +66,26 @@ struct PreviewOverlay: View {
                     .frame(maxWidth: .infinity, minHeight: 80)
             }
             if !item.plainText.isEmpty {
-                ocrSection(item)
+                textSection(item, title: "识别到的文字（可搜索）")
+            }
+        case .pdf:
+            if let url = viewModel.store.imageURL(for: item),
+               let data = try? Data(contentsOf: url),
+               let image = PDFHelper.firstPageImage(from: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: 300)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
+            } else {
+                Text("PDF 数据不可用")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            }
+            if !item.plainText.isEmpty {
+                textSection(item, title: "提取的文字（可检索）")
             }
         case .file:
             VStack(alignment: .leading, spacing: 4) {
@@ -93,9 +112,9 @@ struct PreviewOverlay: View {
     }
 
     @ViewBuilder
-    private func ocrSection(_ item: ClipItem) -> some View {
+    private func textSection(_ item: ClipItem, title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label("识别到的文字（可搜索）", systemImage: "text.viewfinder")
+            Label(title, systemImage: "text.viewfinder")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ScrollView {
