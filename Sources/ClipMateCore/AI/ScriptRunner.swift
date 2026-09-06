@@ -1,5 +1,18 @@
 import Foundation
 
+/// 线程安全的超时标记（定时器线程置位、结束线程读取）。
+private final class TimeoutFlag {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+    func set() {
+        lock.lock(); value = true; lock.unlock()
+    }
+}
+
 /// 自定义脚本执行：文本经 stdin 传入 `/bin/sh -c <command>`，stdout 作为结果。
 /// 脚本由用户自行配置并以当前用户权限运行，超时 10 秒自动终止。
 public enum ScriptRunner {
@@ -32,12 +45,12 @@ public enum ScriptRunner {
                 try? stdin.fileHandleForWriting.close()
             }
 
-            var timedOut = false
+            let timedOut = TimeoutFlag()
             let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
             timer.schedule(deadline: .now() + timeout)
             timer.setEventHandler {
                 if process.isRunning {
-                    timedOut = true
+                    timedOut.set()
                     process.terminate()
                 }
             }
@@ -47,7 +60,7 @@ public enum ScriptRunner {
                 timer?.cancel()
                 let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
                 let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-                if timedOut {
+                if timedOut.isSet {
                     continuation.resume(throwing: ScriptError.timedOut)
                     return
                 }
