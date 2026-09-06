@@ -25,6 +25,7 @@ struct PanelView: View {
             } else {
                 ClipList(viewModel: viewModel)
             }
+            Divider().overlay(Color.primary.opacity(0.08))
             FooterBar()
         }
         .background(VisualEffectBackground())
@@ -99,8 +100,14 @@ struct FilterChips: View {
                         .background(
                             Capsule().fill(
                                 viewModel.filter == kind
-                                    ? Color.accentColor.opacity(0.25)
+                                    ? Color.accentColor.opacity(0.18)
                                     : Color.primary.opacity(0.06)
+                            )
+                        )
+                        .overlay(
+                            Capsule().strokeBorder(
+                                viewModel.filter == kind ? Color.accentColor.opacity(0.45) : .clear,
+                                lineWidth: 1
                             )
                         )
                 }
@@ -132,6 +139,7 @@ struct ClipList: View {
                         ClipRowView(
                             item: item,
                             selected: index == viewModel.selectedIndex,
+                            hovered: viewModel.hoverIndex == index,
                             thumbnail: viewModel.thumbnail(for: item)
                         )
                         .id(index)
@@ -141,6 +149,9 @@ struct ClipList: View {
                         }
                         .onTapGesture {
                             viewModel.selectedIndex = index
+                        }
+                        .onHover { hovering in
+                            viewModel.hoverIndex = hovering ? index : (viewModel.hoverIndex == index ? nil : viewModel.hoverIndex)
                         }
                         .contextMenu { ContextMenuItems(viewModel: viewModel, item: item) }
                     }

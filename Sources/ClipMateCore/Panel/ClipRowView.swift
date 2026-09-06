@@ -14,11 +14,11 @@ extension ClipKind {
 
     var tintColor: Color {
         switch self {
-        case .text: return .blue
-        case .url: return .cyan
-        case .richText: return .indigo
-        case .image: return .purple
-        case .file: return .orange
+        case .text: return Palette.text
+        case .url: return Palette.url
+        case .richText: return Palette.richText
+        case .image: return Palette.image
+        case .file: return Palette.file
         }
     }
 }
@@ -27,6 +27,7 @@ extension ClipKind {
 struct ClipRowView: View {
     let item: ClipItem
     let selected: Bool
+    var hovered: Bool = false
     let thumbnail: NSImage?
 
     var body: some View {
@@ -39,10 +40,9 @@ struct ClipRowView: View {
                     .foregroundStyle(item.kind == .image ? .secondary : .primary)
                 HStack(spacing: 6) {
                     if !item.sourceName.isEmpty {
-                        Label(item.sourceName, systemImage: "app")
+                        Text(item.sourceName)
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(.tertiary)
                     }
                     Text(TimeHelper.relative(item.createdAt))
                         .font(.system(size: 10))
@@ -52,7 +52,7 @@ struct ClipRowView: View {
                             .font(.system(size: 9))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(item.kind.tintColor.opacity(0.15)))
+                            .background(Capsule().fill(item.kind.tintColor.opacity(0.13)))
                             .foregroundStyle(item.kind.tintColor)
                     }
                 }
@@ -61,25 +61,46 @@ struct ClipRowView: View {
             if item.pinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Palette.pin)
             }
             Text("×\(item.useCount)")
                 .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .opacity(item.useCount > 1 ? 1 : 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+                .fill(rowBackground)
         )
+        .overlay(alignment: .leading) {
+            if selected {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.accentColor)
+                    .frame(width: 3, height: 22)
+                    .padding(.leading, 3)
+            }
+        }
         .contentShape(Rectangle())
+    }
+
+    private var rowBackground: Color {
+        if selected { return Color.accentColor.opacity(0.16) }
+        if hovered { return Color.primary.opacity(0.05) }
+        return .clear
     }
 
     @ViewBuilder
     private var leading: some View {
-        if item.kind == .image, let thumbnail {
+        if let hex = item.meta["color"], let swatch = Palette.color(hexString: hex) {
+            // 色值条目：直接展示色卡
+            Circle()
+                .fill(swatch)
+                .frame(width: 20, height: 20)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
+                .frame(width: 22)
+        } else if item.kind == .image, let thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
                 .aspectRatio(contentMode: .fill)

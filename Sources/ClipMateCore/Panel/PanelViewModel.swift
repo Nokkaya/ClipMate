@@ -23,6 +23,7 @@ public final class PanelViewModel: ObservableObject {
     @Published public var filter: FilterKind = .all
     @Published public var items: [ClipItem] = []
     @Published public var selectedIndex = 0
+    @Published public var hoverIndex: Int?
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
