@@ -1,10 +1,23 @@
 import AppKit
 import SwiftUI
 
+/// 单条 AI 问答对话记录
+public struct AIChatMessage: Identifiable, Equatable {
+    public let id = UUID()
+    public let role: String // "user" or "assistant"
+    public var content: String
+
+    public init(role: String, content: String) {
+        self.role = role
+        self.content = content
+    }
+}
+
 /// AI 工作台状态（独立于主面板的窗口）。
 final class AIWorkspaceModel: ObservableObject {
     @Published var item: ClipItem?
     @Published var output = ""
+    @Published var chatHistory: [AIChatMessage] = []
     @Published var isRunning = false
     @Published var finished = false
     @Published var errorText: String?
@@ -27,16 +40,18 @@ final class AIWorkspaceModel: ObservableObject {
     }
 
     var scriptList: [ScriptAction] { settings.customScripts }
+    var promptTemplates: [PromptTemplate] { settings.customPrompts }
 
     var statusText: String {
         ai.isConfigured ? "OpenAI 兼容端点" : "未配置（设置 → AI）"
     }
 
-    /// 打开/切换条目：重置结果区，保留自定义指令。
+    /// 打开/切换条目：重置结果区与会话，保留自定义指令。
     func load(item: ClipItem) {
         cancel()
         self.item = item
         output = ""
+        chatHistory = []
         finished = false
         errorText = nil
         isRunning = false
@@ -51,7 +66,6 @@ final class AIWorkspaceModel: ObservableObject {
     private func beginRun() -> ClipItem? {
         guard let item else { return nil }
         cancel()
-        output = ""
         finished = false
         errorText = nil
         isRunning = true
@@ -65,6 +79,7 @@ final class AIWorkspaceModel: ObservableObject {
         }
     }
 
+    /// 执行内置动作
     func runAI(_ action: AIAction) {
         guard let item = beginRun() else { return }
         guard ai.isConfigured else {
@@ -73,13 +88,104 @@ final class AIWorkspaceModel: ObservableObject {
             return
         }
         let prompt = action.prompt(for: item.plainText, custom: customPrompt)
+        let userTitle = action == .custom
+            ? (customPrompt.isEmpty ? "分析内容" : customPrompt)
+            : action.title
+        chatHistory.append(AIChatMessage(role: "user", content: userTitle))
+        chatHistory.append(AIChatMessage(role: "assistant", content: ""))
+        let assistantIndex = chatHistory.count - 1
+
+        output = ""
         task = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 for try await delta in self.ai.stream(prompt: prompt) {
                     self.output += delta
+                    if assistantIndex < self.chatHistory.count {
+                        self.chatHistory[assistantIndex].content += delta
+                    }
                 }
                 self.endRun(success: true)
+                HapticHelper.feedback()
+            } catch {
+                self.isRunning = false
+                self.errorText = "请求失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// 执行自定义提示词模板
+    func runTemplate(_ template: PromptTemplate) {
+        guard let item = beginRun() else { return }
+        guard ai.isConfigured else {
+            isRunning = false
+            errorText = AIError.notConfigured.localizedDescription
+            return
+        }
+        let prompt = template.prompt(for: item.plainText)
+        chatHistory.append(AIChatMessage(role: "user", content: template.name))
+        chatHistory.append(AIChatMessage(role: "assistant", content: ""))
+        let assistantIndex = chatHistory.count - 1
+
+        output = ""
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                for try await delta in self.ai.stream(prompt: prompt) {
+                    self.output += delta
+                    if assistantIndex < self.chatHistory.count {
+                        self.chatHistory[assistantIndex].content += delta
+                    }
+                }
+                self.endRun(success: true)
+                HapticHelper.feedback()
+            } catch {
+                self.isRunning = false
+                self.errorText = "请求失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// “问剪贴板”：多轮连续对话追问
+    func askQuestion(_ question: String) {
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let item = beginRun() else { return }
+        guard ai.isConfigured else {
+            isRunning = false
+            errorText = AIError.notConfigured.localizedDescription
+            return
+        }
+
+        // 构造消息列表：System + 原文上下文 + 历史轮次 + 当前问题
+        var messages: [[String: String]] = [
+            ["role": "system", "content": "你是 macOS 剪贴板 AI 助手。请基于剪贴板内容提供专业、简明、准确的回答。"]
+        ]
+        messages.append([
+            "role": "user",
+            "content": "剪贴板原文如下：\n```\n\(String(item.plainText.prefix(6000)))\n```"
+        ])
+        for msg in chatHistory {
+            messages.append(["role": msg.role, "content": msg.content])
+        }
+        messages.append(["role": "user", "content": trimmed])
+
+        chatHistory.append(AIChatMessage(role: "user", content: trimmed))
+        chatHistory.append(AIChatMessage(role: "assistant", content: ""))
+        let assistantIndex = chatHistory.count - 1
+
+        output = ""
+        customPrompt = ""
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                for try await delta in self.ai.stream(messages: messages) {
+                    self.output += delta
+                    if assistantIndex < self.chatHistory.count {
+                        self.chatHistory[assistantIndex].content += delta
+                    }
+                }
+                self.endRun(success: true)
+                HapticHelper.feedback()
             } catch {
                 self.isRunning = false
                 self.errorText = "请求失败：\(error.localizedDescription)"
@@ -97,6 +203,9 @@ final class AIWorkspaceModel: ObservableObject {
                     self.output = output
                     self.isRunning = false
                     self.finished = true
+                    self.chatHistory.append(AIChatMessage(role: "user", content: "脚本：\(script.name)"))
+                    self.chatHistory.append(AIChatMessage(role: "assistant", content: output))
+                    HapticHelper.feedback()
                 }
             } catch {
                 self.isRunning = false
@@ -107,12 +216,13 @@ final class AIWorkspaceModel: ObservableObject {
 
     // MARK: - 结果处置
 
-    var hasResult: Bool { finished && !output.isEmpty }
+    var hasResult: Bool { (finished || !chatHistory.isEmpty) && !output.isEmpty }
 
     func copyResult() {
         guard hasResult else { return }
         PasteBack.write(.text(output))
         monitor.suppress(seconds: 1.5)
+        HapticHelper.feedback()
     }
 
     /// 结果作为新条目入库（原内容保留在历史中）。
@@ -125,6 +235,7 @@ final class AIWorkspaceModel: ObservableObject {
             sourceName: "ClipMate",
             tags: ["AI"]
         )
+        HapticHelper.generic()
     }
 
     /// 直接粘贴到唤起面板前的目标应用，随后关闭工作台与主面板。
@@ -139,6 +250,7 @@ final class AIWorkspaceModel: ObservableObject {
         if target == nil || !PasteBack.isAccessibilityGranted() {
             NSSound(named: "Basso")?.play()
         }
+        HapticHelper.feedback()
     }
 }
 

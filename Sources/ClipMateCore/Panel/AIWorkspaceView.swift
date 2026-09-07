@@ -121,21 +121,36 @@ struct AIWorkspaceView: View {
     // MARK: - 操作
 
     private var actionArea: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                ForEach(AIAction.allCases) { action in
-                    Button {
-                        model.runAI(action)
-                    } label: {
-                        Label(action.title, systemImage: action.systemImage)
-                            .font(.system(size: 11))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(AIAction.allCases) { action in
+                        Button {
+                            model.runAI(action)
+                        } label: {
+                            Label(action.title, systemImage: action.systemImage)
+                                .font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isRunning || model.item == nil)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isRunning || model.item == nil)
+                    ForEach(model.promptTemplates) { template in
+                        Button {
+                            model.runTemplate(template)
+                        } label: {
+                            Label(template.name, systemImage: template.icon)
+                                .font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isRunning || model.item == nil)
+                    }
                 }
             }
+            .modernScrollbar()
             scriptRow
         }
     }
@@ -144,22 +159,25 @@ struct AIWorkspaceView: View {
     private var scriptRow: some View {
         // 自定义脚本与 AI 动作共用结果区
         if !scriptList.isEmpty {
-            HStack(spacing: 6) {
-                Text("脚本")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                ForEach(scriptList) { script in
-                    Button {
-                        model.runScript(script)
-                    } label: {
-                        Label(script.name, systemImage: "terminal")
-                            .font(.system(size: 11))
-                            .lineLimit(1)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Text("脚本")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    ForEach(scriptList) { script in
+                        Button {
+                            model.runScript(script)
+                        } label: {
+                            Label(script.name, systemImage: "terminal")
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isRunning || model.item == nil)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isRunning || model.item == nil)
                 }
             }
+            .modernScrollbar()
         }
     }
 
@@ -170,26 +188,64 @@ struct AIWorkspaceView: View {
     @ViewBuilder
     private var promptField: some View {
         HStack(spacing: 6) {
-            TextField("自定义指令（配合“自定义”动作，⏎ 执行）", text: $model.customPrompt)
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            TextField("向 AI 提问 / 连续追问剪贴板内容（⏎ 发送）…", text: $model.customPrompt)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12))
-                .onSubmit { model.runAI(.custom) }
-            if !model.customPrompt.isEmpty {
-                Button("执行") { model.runAI(.custom) }
-                    .disabled(model.isRunning || model.item == nil)
+                .onSubmit {
+                    guard !model.customPrompt.isEmpty else { return }
+                    model.askQuestion(model.customPrompt)
+                }
+            Button(model.chatHistory.isEmpty ? "发送" : "追问") {
+                guard !model.customPrompt.isEmpty else { return }
+                model.askQuestion(model.customPrompt)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(model.isRunning || model.item == nil || model.customPrompt.trimmingCharacters(in: .whitespaces).isEmpty)
         }
     }
 
-    // MARK: - 结果
+    // MARK: - 结果 / 对话流
 
     private var outputArea: some View {
         ZStack(alignment: .top) {
             ScrollView {
-                Text(outputPlaceholder)
-                    .font(.system(size: 12.5, design: .default))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                if model.chatHistory.count > 2 {
+                    // 多轮问答流
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(model.chatHistory) { msg in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: msg.role == "user" ? "person.crop.circle" : "sparkles")
+                                        .font(.system(size: 10))
+                                    Text(msg.role == "user" ? "你" : "AI 助手")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .foregroundStyle(msg.role == "user" ? Color.accentColor : Color.purple)
+
+                                Text(msg.content.isEmpty && model.isRunning ? "正在生成中…" : msg.content)
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                                    .padding(8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(msg.role == "user" ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.03))
+                                    )
+                            }
+                        }
+                    }
+                    .padding(4)
+                } else {
+                    Text(outputPlaceholder)
+                        .font(.system(size: 12.5, design: .default))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
             }
             .modernScrollbar()
             if model.isRunning {
@@ -208,9 +264,9 @@ struct AIWorkspaceView: View {
     }
 
     private var outputPlaceholder: String {
-        if model.isRunning && model.output.isEmpty { return "生成中…" }
+        if model.isRunning && model.output.isEmpty { return "AI 正在分析并生成中…" }
         if model.hasResult || !model.output.isEmpty { return model.output }
-        return "选择上方动作，或输入自定义指令。\n结果可选中复制，也能替换为新条目或直接粘贴。"
+        return "点击上方快捷动作、提示词模板，或在下方输入框中向 AI 自由提问/连续追问。\n生成结果可一键复制、存为新剪贴板条目或直接粘贴回目标应用。"
     }
 
     // MARK: - 底部动作

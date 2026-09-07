@@ -55,6 +55,96 @@ struct ConfirmClearOverlay: View {
     }
 }
 
+/// 片段新建与编辑浮层（标题、分组、短码与正文）。
+struct SnippetEditOverlay: View {
+    @ObservedObject var viewModel: PanelViewModel
+
+    var body: some View {
+        overlayContainer {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: "bookmark.fill")
+                        .foregroundStyle(Color.accentColor)
+                    Text(viewModel.snippetTargetID == nil ? "新建片段" : "编辑片段")
+                        .font(.headline)
+                    Spacer()
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("标题（名称）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("如：开票抬头、Git rebase 常用流、邮箱签名", text: $viewModel.snippetDraftTitle)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12.5))
+
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("分组")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("开发 / 常用 / 邮件…", text: $viewModel.snippetDraftGroup)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12))
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("快捷短码（可选）")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField(";tax / ;git…", text: $viewModel.snippetDraftShortcode)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12))
+                        }
+                    }
+
+                    if !viewModel.availableSnippetGroups.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 4) {
+                                Text("已有分组:")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                ForEach(viewModel.availableSnippetGroups, id: \.self) { g in
+                                    Button(g) {
+                                        viewModel.snippetDraftGroup = g
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(Color.primary.opacity(0.08)))
+                                    .foregroundStyle(.primary)
+                                }
+                            }
+                        }
+                        .modernScrollbar()
+                    }
+
+                    Text("片段内容")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $viewModel.snippetDraftContent)
+                        .font(.system(size: 12, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .modernScrollbar()
+                        .padding(6)
+                        .frame(maxWidth: .infinity, minHeight: 110, maxHeight: 160)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                }
+
+                HStack {
+                    Button("取消") { viewModel.showSnippetOverlay = false }
+                        .keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button("保存片段") { viewModel.saveSnippet() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(viewModel.snippetDraftContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .frame(width: 360)
+        }
+    }
+}
+
 private func overlayContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
     ZStack {
         Color.black.opacity(0.28)

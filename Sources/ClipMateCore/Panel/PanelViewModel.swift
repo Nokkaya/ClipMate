@@ -12,6 +12,17 @@ public final class PanelViewModel: ObservableObject {
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
+
+    // 片段专用管理状态
+    @Published public var showSnippetOverlay = false
+    @Published public var snippetTargetID: Int64? = nil
+    @Published public var snippetDraftTitle = ""
+    @Published public var snippetDraftGroup = ""
+    @Published public var snippetDraftShortcode = ""
+    @Published public var snippetDraftContent = ""
+    @Published public var snippetGroup: String? = nil
+    @Published public var availableSnippetGroups: [String] = []
+
     /// 粘贴队列（会话内有效，按序批量粘贴）。
     @Published public var queue: [ClipItem] = []
     /// 详情预览浮层当前条目。
@@ -47,34 +58,38 @@ public final class PanelViewModel: ObservableObject {
 
     // MARK: - 数据
 
-    // MARK: - 数据
-
     public func reload(resetSelection: Bool = false) {
         let q = query
         let f = filter
+        let sg = snippetGroup
         if q.isEmpty {
             searchTask?.cancel()
             searchTask = nil
-            let results = store.search(query: q, filter: f, limit: 300)
+            let results = store.search(query: q, filter: f, snippetGroup: sg, limit: 300)
             applySearchResults(results, resetSelection: resetSelection)
         } else {
             searchTask?.cancel()
             let store = self.store
             searchTask = Task.detached(priority: .userInitiated) { [weak self] in
-                let results = store.search(query: q, filter: f, limit: 300)
+                let results = store.search(query: q, filter: f, snippetGroup: sg, limit: 300)
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
-                    guard let self, self.query == q, self.filter == f else { return }
+                    guard let self, self.query == q, self.filter == f, self.snippetGroup == sg else { return }
                     self.applySearchResults(results, resetSelection: resetSelection)
                 }
             }
         }
+        if filter == .snippet {
+            refreshSnippetGroups()
+        }
     }
 
+    /// 用户在搜索框键入内容时，防抖 100ms 触发异步检索
     public func queryChanged() {
         searchTask?.cancel()
         let q = query
         let f = filter
+        let sg = snippetGroup
         if q.isEmpty {
             reload(resetSelection: true)
             return
@@ -83,10 +98,10 @@ public final class PanelViewModel: ObservableObject {
         searchTask = Task.detached(priority: .userInitiated) { [weak self] in
             try? await Task.sleep(nanoseconds: 100_000_000)
             guard !Task.isCancelled else { return }
-            let results = store.search(query: q, filter: f, limit: 300)
+            let results = store.search(query: q, filter: f, snippetGroup: sg, limit: 300)
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
-                guard let self, self.query == q, self.filter == f else { return }
+                guard let self, self.query == q, self.filter == f, self.snippetGroup == sg else { return }
                 self.applySearchResults(results, resetSelection: true)
             }
         }
@@ -141,10 +156,26 @@ public final class PanelViewModel: ObservableObject {
     public func changeFilter(_ kind: FilterKind) {
         guard filter != kind else { return }
         filter = kind
+        snippetGroup = nil
         clearMultiSelection()
         selectedIndex = 0
         selectedID = nil
         reload(resetSelection: true)
+    }
+
+    /// 切换片段子分组（如：开发 / 常用 / 邮件）
+    public func changeSnippetGroup(_ group: String?) {
+        guard snippetGroup != group else { return }
+        snippetGroup = group
+        clearMultiSelection()
+        selectedIndex = 0
+        selectedID = nil
+        reload(resetSelection: true)
+        HapticHelper.alignment()
+    }
+
+    public func refreshSnippetGroups() {
+        availableSnippetGroups = store.allSnippetGroups()
     }
 
     /// 单选语义：点击行 = 只选中这一行，清除批量多选残留。
@@ -371,7 +402,7 @@ public final class PanelViewModel: ObservableObject {
         reload()
     }
 
-    // MARK: - 片段收藏（标签驱动）
+    // MARK: - 片段管理
 
     @discardableResult
     public func toggleSnippet(item: ClipItem? = nil) -> Bool {
@@ -379,12 +410,61 @@ public final class PanelViewModel: ObservableObject {
         guard let target else { return false }
         let isSnippet = target.tags.contains(FilterKind.snippetTag)
         try? store.mutateTag(target.id, tag: FilterKind.snippetTag, add: !isSnippet)
+        refreshSnippetGroups()
         reload()
+        HapticHelper.alignment()
         return !isSnippet
+    }
+
+    public func openNewSnippet() {
+        snippetTargetID = nil
+        snippetDraftTitle = ""
+        snippetDraftGroup = snippetGroup ?? ""
+        snippetDraftShortcode = ""
+        snippetDraftContent = ""
+        refreshSnippetGroups()
+        showSnippetOverlay = true
+    }
+
+    public func openEditSnippet(item: ClipItem? = nil) {
+        guard let target = item ?? selectedItem else { return }
+        snippetTargetID = target.id
+        snippetDraftTitle = target.title ?? ""
+        snippetDraftGroup = target.snippetGroup ?? ""
+        snippetDraftShortcode = target.snippetShortcode ?? ""
+        snippetDraftContent = target.plainText
+        refreshSnippetGroups()
+        showSnippetOverlay = true
+    }
+
+    public func saveSnippet() {
+        let content = snippetDraftContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        if let id = snippetTargetID {
+            _ = try? store.updateSnippet(
+                id: id,
+                title: snippetDraftTitle,
+                group: snippetDraftGroup,
+                shortcode: snippetDraftShortcode,
+                text: content
+            )
+        } else {
+            _ = try? store.createSnippet(
+                title: snippetDraftTitle,
+                text: content,
+                group: snippetDraftGroup,
+                shortcode: snippetDraftShortcode
+            )
+        }
+        showSnippetOverlay = false
+        refreshSnippetGroups()
+        reload()
+        HapticHelper.feedback()
     }
 
     public func clearTransientState() {
         showEditOverlay = false
+        showSnippetOverlay = false
         showConfirmClear = false
         previewItem = nil
     }

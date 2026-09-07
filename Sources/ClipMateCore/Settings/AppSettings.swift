@@ -97,6 +97,16 @@ public final class AppSettings: ObservableObject {
             }
         }
     }
+    @Published public var hapticFeedbackEnabled: Bool {
+        didSet { defaults.set(hapticFeedbackEnabled, forKey: "hapticFeedbackEnabled") }
+    }
+    @Published public var customPrompts: [PromptTemplate] {
+        didSet {
+            if let data = try? JSONEncoder().encode(customPrompts) {
+                defaults.set(data, forKey: "customPrompts")
+            }
+        }
+    }
 
     /// API Key 只进 Keychain，不落 UserDefaults。
     public var aiAPIKey: String {
@@ -119,6 +129,7 @@ public final class AppSettings: ObservableObject {
             "maxCaptureMB": 20,
             "excludedApps": Self.defaultExcludedApps,
             "soundOnCapture": false,
+            "hapticFeedbackEnabled": true,
             "launchAtLogin": false,
             "pauseCapture": false,
             "aiEnabled": false,
@@ -134,6 +145,7 @@ public final class AppSettings: ObservableObject {
         maxCaptureMB = defaults.integer(forKey: "maxCaptureMB")
         excludedApps = defaults.array(forKey: "excludedApps") as? [String] ?? Self.defaultExcludedApps
         soundOnCapture = defaults.bool(forKey: "soundOnCapture")
+        hapticFeedbackEnabled = defaults.object(forKey: "hapticFeedbackEnabled") as? Bool ?? true
         launchAtLogin = defaults.bool(forKey: "launchAtLogin")
         pauseCapture = defaults.bool(forKey: "pauseCapture")
         aiEnabled = defaults.bool(forKey: "aiEnabled")
@@ -146,6 +158,11 @@ public final class AppSettings: ObservableObject {
             customScripts = (try? JSONDecoder().decode([ScriptAction].self, from: scriptData)) ?? []
         } else {
             customScripts = []
+        }
+        if let promptData = defaults.data(forKey: "customPrompts") {
+            customPrompts = (try? JSONDecoder().decode([PromptTemplate].self, from: promptData)) ?? PromptTemplate.defaults
+        } else {
+            customPrompts = PromptTemplate.defaults
         }
     }
 

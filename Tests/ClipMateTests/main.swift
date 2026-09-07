@@ -688,6 +688,88 @@ runner.run("PanelViewModel 批量全选、合并复制与批量固定") {
     runner.expectTrue(pbString?.contains("---\n") == true, "批量合并复制成功写入剪贴板")
 }
 
+runner.run("ClipStore 片段 CRUD、独立分组与子分组检索") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // 1. 创建新片段
+    let snip1 = try store.createSnippet(
+        title: "Git 强制推远程",
+        text: "git push origin --force-with-lease",
+        group: "开发",
+        shortcode: ";gpf"
+    )
+    runner.expectTrue(snip1.isSnippet, "条目标记为片段")
+    runner.expectEqual(snip1.title, "Git 强制推远程", "片段标题匹配")
+    runner.expectEqual(snip1.snippetGroup, "开发", "分组匹配")
+    runner.expectEqual(snip1.snippetShortcode, ";gpf", "快捷短码匹配")
+
+    let snip2 = try store.createSnippet(
+        title: "公司开票抬头",
+        text: "北京某某科技有限责任公司 91110108MA0000000X",
+        group: "财务",
+        shortcode: ";tax"
+    )
+    runner.expectTrue(snip2.isSnippet, "财务片段创建成功")
+
+    // 2. 分组去重列表
+    let groups = store.allSnippetGroups()
+    runner.expectEqual(groups, ["开发", "财务"], "所有分组去重且字典序排列")
+
+    // 3. 按子分组检索过滤
+    let devSnippets = store.search(query: "", filter: .snippet, snippetGroup: "开发")
+    runner.expectEqual(devSnippets.count, 1, "按开发分组过滤只返回 1 条")
+    runner.expectEqual(devSnippets.first?.id, snip1.id, "返回指定开发片段")
+
+    let financeSnippets = store.search(query: "", filter: .snippet, snippetGroup: "财务")
+    runner.expectEqual(financeSnippets.count, 1, "按财务分组过滤只返回 1 条")
+    runner.expectEqual(financeSnippets.first?.id, snip2.id, "返回指定财务片段")
+
+    // 4. 更新片段
+    let updated = try store.updateSnippet(
+        id: snip1.id,
+        title: "Git 安全强推",
+        group: "Git工作流",
+        shortcode: ";gpf2",
+        text: "git push -u origin HEAD --force-with-lease"
+    )
+    runner.expectEqual(updated?.title, "Git 安全强推", "更新片段标题")
+    runner.expectEqual(updated?.snippetGroup, "Git工作流", "更新片段分组")
+    runner.expectEqual(updated?.snippetShortcode, ";gpf2", "更新片段快捷短码")
+    runner.expectTrue(updated?.plainText.contains("-u origin") == true, "更新片段内容")
+
+    // 5. 全文搜索联动
+    let searchRes = store.search(query: "force-with-lease", filter: .snippet)
+    runner.expectEqual(searchRes.count, 1, "全文搜索可查出片段")
+    runner.expectEqual(searchRes.first?.id, snip1.id, "搜索命中正确片段条目")
+}
+
+runner.run("PromptTemplate 变量插值与默认模板库") {
+    runner.expectTrue(PromptTemplate.defaults.count >= 6, "内置 6+ 种精选提示词模板")
+    let translate = PromptTemplate.defaults.first { $0.id == "translate" }
+    runner.expectTrue(translate != nil, "内置中英互译模板存在")
+
+    // 测试 {content} 占位符插值
+    let code = "function test() { return 42; }"
+    let custom = PromptTemplate(name: "TS测试", icon: "sparkles", template: "请解释代码：\n\n{content}\n\n请列出风险点。")
+    let promptResult = custom.prompt(for: code)
+    runner.expectTrue(promptResult.contains("function test() { return 42; }"), "正确替换 {content} 占位")
+    runner.expectTrue(promptResult.contains("请列出风险点。"), "保留模板后置文本")
+
+    // 测试不含 {content} 时的自动追加
+    let appendOnly = PromptTemplate(name: "简单说明", template: "解释下面这段：")
+    let appendResult = appendOnly.prompt(for: "echo hello")
+    runner.expectTrue(appendResult.contains("解释下面这段：\n\necho hello"), "无占位符时自动追加文本")
+}
+
+runner.run("HapticHelper 触觉反馈安全调度") {
+    // 验证调用 AppKit 触觉反馈不抛出崩溃与异常
+    HapticHelper.alignment()
+    HapticHelper.feedback()
+    HapticHelper.generic()
+    runner.expectTrue(true, "触觉反馈正常执行无异常")
+}
+
 print("----")
 if runner.failures.isEmpty {
     print("全部 \(runner.passed) 个用例通过 ✅")

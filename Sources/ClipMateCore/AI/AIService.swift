@@ -54,6 +54,47 @@ public enum AIAction: String, CaseIterable, Identifiable {
     }
 }
 
+/// 用户或内置的提示词模板（支持 {content} 变量插值）。
+public struct PromptTemplate: Codable, Identifiable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var icon: String
+    public var template: String
+
+    public init(id: String = UUID().uuidString, name: String, icon: String = "sparkles", template: String) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.template = template
+    }
+
+    /// 将模板中的 {content} 变量替换为剪贴板实际内容
+    public func prompt(for content: String) -> String {
+        let trimmed = String(content.prefix(8000))
+        if template.contains("{content}") {
+            return template.replacingOccurrences(of: "{content}", with: trimmed)
+        } else {
+            return "\(template)\n\n\(trimmed)"
+        }
+    }
+
+    /// 默认精选模板库
+    public static let defaults: [PromptTemplate] = [
+        PromptTemplate(id: "translate", name: "中英互译", icon: "globe",
+                       template: "请将以下内容翻译为自然流畅的简体中文；若原文已经是中文，则翻译为地道英文。直接输出译文，不要多余解释：\n\n{content}"),
+        PromptTemplate(id: "summarize", name: "提取要点", icon: "list.bullet",
+                       template: "请提炼以下内容的核心关键信息，以清晰精炼的项目符号清单输出：\n\n{content}"),
+        PromptTemplate(id: "explainCode", name: "解释代码", icon: "curlybraces",
+                       template: "请作为资深软件工程师，简明扼要地解释以下代码/命令的核心逻辑、作用和注意事项：\n\n{content}"),
+        PromptTemplate(id: "unitTest", name: "生成单测", icon: "checkmark.seal",
+                       template: "请为以下代码编写覆盖边界用例与异常的高质量单元测试：\n\n{content}"),
+        PromptTemplate(id: "rewrite", name: "专业润色", icon: "wand.and.stars",
+                       template: "请把以下内容改写得更专业、通顺且精炼，保持原意，直接输出润色结果：\n\n{content}"),
+        PromptTemplate(id: "jsonToTS", name: "JSON转TS", icon: "arrow.triangle.2.circlepath",
+                       template: "请将以下 JSON 数据结构精确转换为严格规范的 TypeScript interface / type 定义：\n\n{content}")
+    ]
+}
+
 public enum AIError: LocalizedError {
     case notConfigured
     case requestFailed(String)
@@ -87,7 +128,8 @@ public struct OpenAICompatProvider {
         self.config = config
     }
 
-    public func stream(system: String, user: String) -> AsyncThrowingStream<String, Error> {
+    /// 多轮对话流式调用
+    public func stream(messages: [[String: String]]) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -100,10 +142,7 @@ public struct OpenAICompatProvider {
                     let body: [String: Any] = [
                         "model": config.model,
                         "stream": true,
-                        "messages": [
-                            ["role": "system", "content": system],
-                            ["role": "user", "content": user],
-                        ],
+                        "messages": messages,
                     ]
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
                     let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -135,6 +174,13 @@ public struct OpenAICompatProvider {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+
+    public func stream(system: String, user: String) -> AsyncThrowingStream<String, Error> {
+        stream(messages: [
+            ["role": "system", "content": system],
+            ["role": "user", "content": user],
+        ])
+    }
 }
 
 /// AI 门面：读取设置装配 Provider。
@@ -151,16 +197,28 @@ public final class AIService {
         return !settings.aiModel.isEmpty
     }
 
-    public func stream(prompt: String) -> AsyncThrowingStream<String, Error> {
-        guard isConfigured, let url = URL(string: settings.aiEndpoint) else {
-            return AsyncThrowingStream { $0.finish(throwing: AIError.notConfigured) }
-        }
+    private var provider: OpenAICompatProvider? {
+        guard isConfigured, let url = URL(string: settings.aiEndpoint) else { return nil }
         let key = settings.aiAPIKey
         let config = AIProviderConfig(endpoint: url, model: settings.aiModel, apiKey: key.isEmpty ? nil : key)
-        return OpenAICompatProvider(config: config).stream(
+        return OpenAICompatProvider(config: config)
+    }
+
+    public func stream(prompt: String) -> AsyncThrowingStream<String, Error> {
+        guard let provider else {
+            return AsyncThrowingStream { $0.finish(throwing: AIError.notConfigured) }
+        }
+        return provider.stream(
             system: "你是 macOS 剪贴板助手，直接输出结果，不要输出多余的客套解释。",
             user: prompt
         )
+    }
+
+    public func stream(messages: [[String: String]]) -> AsyncThrowingStream<String, Error> {
+        guard let provider else {
+            return AsyncThrowingStream { $0.finish(throwing: AIError.notConfigured) }
+        }
+        return provider.stream(messages: messages)
     }
 
     public func testConnection() async -> String {

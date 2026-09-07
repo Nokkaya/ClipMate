@@ -127,10 +127,10 @@ public final class ClipStore {
 
     /// 检索：文本路径（FTS5 前缀/LIKE）+ 语义向量路径，RRF 混合排序。
     /// 拉丁文查询走 FTS5，含 CJK 的查询走 LIKE（系统 FTS5 默认分词器不切中文）。
-    public func search(query: String, filter: FilterKind = .all, limit: Int = 300) -> [ClipItem] {
+    public func search(query: String, filter: FilterKind = .all, snippetGroup: String? = nil, limit: Int = 300) -> [ClipItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            let textResults = try textSearch(trimmed, filter: filter, limit: limit)
+            let textResults = try textSearch(trimmed, filter: filter, snippetGroup: snippetGroup, limit: limit)
             guard !trimmed.isEmpty, let provider = embeddingProvider else { return textResults }
 
             let vectors = embeddingVectors()
@@ -162,7 +162,7 @@ public final class ClipStore {
             // 仅对缺失条目做一次批量取回（替代逐条 item(id:)），并应用类别过滤
             var itemMap = Dictionary(uniqueKeysWithValues: textResults.map { ($0.id, $0) })
             let missing = vectorRankIDs.filter { itemMap[$0] == nil }
-            for fetched in items(ids: missing) where matchesFilter(fetched, filter) {
+            for fetched in items(ids: missing) where matchesFilter(fetched, filter, snippetGroup: snippetGroup) {
                 itemMap[fetched.id] = fetched
             }
             return scores
@@ -177,16 +177,22 @@ public final class ClipStore {
         }
     }
 
-    private func textSearch(_ trimmed: String, filter: FilterKind, limit: Int) throws -> [ClipItem] {
+    private func textSearch(_ trimmed: String, filter: FilterKind, snippetGroup: String? = nil, limit: Int) throws -> [ClipItem] {
         if !trimmed.isEmpty, db.hasFTS5, !containsCJK(trimmed) {
             let ftsQuery = ftsExpression(for: trimmed)
             var sql = "SELECT \(Self.ftsListColumns) FROM clip, clip_fts WHERE clip_fts MATCH ? AND clip.id = clip_fts.rowid"
             if let clause = filter.kindClause { sql += " AND \(clause)" }
             if let extra = filter.extraClause { sql += " AND \(extra)" }
             if filter == .pinned { sql += " AND clip.pinned = 1" }
+            var bindArgs: [SQLValue] = [.text(ftsQuery)]
+            if filter == .snippet, let group = snippetGroup, !group.isEmpty {
+                sql += " AND clip.meta LIKE ?"
+                bindArgs.append(.text("%\"snippet_group\":\"\(group)\"%"))
+            }
             sql += " ORDER BY clip.pinned DESC, rank LIMIT ?"
+            bindArgs.append(.int(Int64(limit)))
             let statement = try db.prepare(sql)
-            statement.bind([.text(ftsQuery), .int(Int64(limit))])
+            statement.bind(bindArgs)
             return collect(statement)
         }
 
@@ -200,6 +206,10 @@ public final class ClipStore {
         if let clause = filter.kindClause { clauses.append(clause) }
         if let extra = filter.extraClause { clauses.append(extra) }
         if filter == .pinned { clauses.append("pinned = 1") }
+        if filter == .snippet, let group = snippetGroup, !group.isEmpty {
+            clauses.append("meta LIKE ?")
+            args.append(.text("%\"snippet_group\":\"\(group)\"%"))
+        }
         var sql = "SELECT \(Self.listColumns) FROM clip"
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
         sql += " ORDER BY pinned DESC, created_at DESC LIMIT ?"
@@ -209,7 +219,10 @@ public final class ClipStore {
         return collect(statement)
     }
 
-    func matchesFilter(_ item: ClipItem, _ filter: FilterKind) -> Bool {
+    func matchesFilter(_ item: ClipItem, _ filter: FilterKind, snippetGroup: String? = nil) -> Bool {
+        if filter == .snippet, let group = snippetGroup, !group.isEmpty {
+            guard item.tags.contains(FilterKind.snippetTag) && item.snippetGroup == group else { return false }
+        }
         switch filter {
         case .all: return true
         case .pinned: return item.pinned
@@ -365,6 +378,182 @@ public final class ClipStore {
         ])
         try statement.run()
         return item(id: id)
+    }
+
+    // MARK: - 片段管理
+
+    /// 获取当前所有已存在的片段分组列表（去重且排序）
+    public func allSnippetGroups() -> [String] {
+        guard let statement = try? db.prepare("""
+            SELECT meta FROM clip WHERE tags LIKE '%"\(FilterKind.snippetTag)"%'
+            """) else { return [] }
+        var groups = Set<String>()
+        while statement.step() {
+            if let metaJson = statement.columnText(0),
+               let data = metaJson.data(using: .utf8),
+               let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+               let group = dict["snippet_group"] as? String {
+                let trimmed = group.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    groups.insert(trimmed)
+                }
+            }
+        }
+        return groups.sorted()
+    }
+
+    /// 创建一个新片段（可来自手动录入，或从历史转换）
+    @discardableResult
+    public func createSnippet(title: String, text: String, group: String? = nil, shortcode: String? = nil) throws -> ClipItem {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedGroup = group?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedShortcode = shortcode?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var tags = [FilterKind.snippetTag]
+        if let g = trimmedGroup, !g.isEmpty, !tags.contains(g) {
+            tags.append(g)
+        }
+
+        var meta: [String: String] = ["snippet": "1"]
+        if let g = trimmedGroup, !g.isEmpty {
+            meta["snippet_group"] = g
+        }
+        if let s = trimmedShortcode, !s.isEmpty {
+            meta["snippet_shortcode"] = s
+        }
+
+        let now = Date()
+        let kind = ClipKind.text
+        let hashData = Data(SHA256.hash(data: Data(kind.rawValue.utf8) + Data(text.utf8)))
+
+        // 检查是否已有相同哈希的内容，若有则升级为片段
+        let dup = try? db.prepare("SELECT id FROM clip WHERE content_hash = ? LIMIT 1")
+        dup?.bind([.blob(hashData)])
+        let existingID: Int64? = (dup?.step() == true) ? dup?.columnInt(0) : nil
+
+        if let id = existingID, let existing = item(id: id) {
+            var updatedTags = existing.tags
+            if !updatedTags.contains(FilterKind.snippetTag) {
+                updatedTags.insert(FilterKind.snippetTag, at: 0)
+            }
+            if let g = trimmedGroup, !g.isEmpty, !updatedTags.contains(g) {
+                updatedTags.append(g)
+            }
+            var updatedMeta = existing.meta
+            updatedMeta["snippet"] = "1"
+            if let g = trimmedGroup, !g.isEmpty { updatedMeta["snippet_group"] = g }
+            if let s = trimmedShortcode, !s.isEmpty { updatedMeta["snippet_shortcode"] = s }
+
+            let statement = try db.prepare("""
+                UPDATE clip SET title = ?, tags = ?, meta = ?, last_used_at = ? WHERE id = ?
+                """)
+            statement.bind([
+                .text(trimmedTitle.isEmpty ? (existing.title ?? "") : trimmedTitle),
+                .text(json(updatedTags)),
+                .text(json(updatedMeta)),
+                .double(now.timeIntervalSince1970),
+                .int(existing.id)
+            ])
+            try statement.run()
+            return item(id: existing.id)!
+        }
+
+        let statement = try db.prepare("""
+            INSERT INTO clip (
+                kind, plain_text, source_bundle, source_name, content_hash,
+                byte_size, created_at, last_used_at, use_count, pinned,
+                tags, title, meta, inline_data, blob_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, NULL, NULL)
+            """)
+        statement.bind([
+            .text(kind.rawValue),
+            .text(text),
+            .text(""),
+            .text("ClipMate"),
+            .blob(hashData),
+            .int(Int64(text.utf8.count)),
+            .double(now.timeIntervalSince1970),
+            .double(now.timeIntervalSince1970),
+            .text(json(tags)),
+            .text(trimmedTitle.isEmpty ? nil : trimmedTitle),
+            .text(json(meta))
+        ])
+        try statement.run()
+        return item(id: db.lastInsertRowID)!
+    }
+
+    /// 更新片段元数据或正文
+    @discardableResult
+    public func updateSnippet(id: Int64, title: String?, group: String?, shortcode: String?, text: String? = nil) throws -> ClipItem? {
+        guard let existing = item(id: id) else { return nil }
+
+        var tags = existing.tags
+        if !tags.contains(FilterKind.snippetTag) {
+            tags.insert(FilterKind.snippetTag, at: 0)
+        }
+
+        var meta = existing.meta
+        meta["snippet"] = "1"
+
+        if let group {
+            let trimmedGroup = group.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedGroup.isEmpty {
+                meta.removeValue(forKey: "snippet_group")
+            } else {
+                meta["snippet_group"] = trimmedGroup
+                if !tags.contains(trimmedGroup) {
+                    tags.append(trimmedGroup)
+                }
+            }
+        }
+
+        if let shortcode {
+            let trimmedCode = shortcode.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedCode.isEmpty {
+                meta.removeValue(forKey: "snippet_shortcode")
+            } else {
+                meta["snippet_shortcode"] = trimmedCode
+            }
+        }
+
+        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newTitle = (trimmedTitle?.isEmpty == false) ? trimmedTitle : nil
+
+        if let text, text != existing.plainText {
+            let hashData = Data(SHA256.hash(data: Data(existing.kind.rawValue.utf8) + Data(text.utf8)))
+            let statement = try db.prepare("""
+                UPDATE clip SET plain_text = ?, content_hash = ?, byte_size = ?, title = ?, tags = ?, meta = ?, embedding = NULL WHERE id = ?
+                """)
+            statement.bind([
+                .text(text),
+                .blob(hashData),
+                .int(Int64(text.utf8.count)),
+                .text(newTitle),
+                .text(json(tags)),
+                .text(json(meta)),
+                .int(id)
+            ])
+            try statement.run()
+            resetEmbeddingCache()
+        } else {
+            let statement = try db.prepare("""
+                UPDATE clip SET title = ?, tags = ?, meta = ? WHERE id = ?
+                """)
+            statement.bind([
+                .text(newTitle),
+                .text(json(tags)),
+                .text(json(meta)),
+                .int(id)
+            ])
+            try statement.run()
+        }
+
+        return item(id: id)
+    }
+
+    /// 获取全部片段条目（可选按分组过滤）
+    public func allSnippets(group: String? = nil) -> [ClipItem] {
+        search(query: "", filter: .snippet, snippetGroup: group, limit: 1000)
     }
 
     public func delete(_ id: Int64) throws {

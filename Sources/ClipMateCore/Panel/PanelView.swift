@@ -9,6 +9,7 @@ struct PanelView: View {
         ZStack {
             mainContent
             if viewModel.showEditOverlay { EditOverlay(viewModel: viewModel) }
+            if viewModel.showSnippetOverlay { SnippetEditOverlay(viewModel: viewModel) }
             if viewModel.showConfirmClear { ConfirmClearOverlay(viewModel: viewModel) }
             if viewModel.previewItem != nil { PreviewOverlay(viewModel: viewModel) }
         }
@@ -92,55 +93,102 @@ struct FilterChips: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(FilterKind.allCases, id: \.self) { kind in
-                Button {
-                    viewModel.changeFilter(kind)
-                } label: {
-                    Text(kind.title)
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule().fill(
-                                viewModel.filter == kind
-                                    ? Color.accentColor.opacity(0.18)
-                                    : Color.primary.opacity(0.06)
-                            )
-                        )
-                        .overlay(
-                            Capsule().strokeBorder(
-                                viewModel.filter == kind ? Color.accentColor.opacity(0.45) : .clear,
-                                lineWidth: 1
-                            )
-                        )
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(viewModel.filter == kind ? Color.accentColor : Color.secondary)
-            }
-            Spacer()
-            if !viewModel.queue.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "list.number")
-                    Text("队列 \(viewModel.queue.count)")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                ForEach(FilterKind.allCases, id: \.self) { kind in
                     Button {
-                        viewModel.clearQueue()
+                        viewModel.changeFilter(kind)
                     } label: {
-                        Image(systemName: "xmark.circle.fill").font(.system(size: 9))
+                        Text(kind.title)
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(
+                                    viewModel.filter == kind
+                                        ? Color.accentColor.opacity(0.18)
+                                        : Color.primary.opacity(0.06)
+                                )
+                            )
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    viewModel.filter == kind ? Color.accentColor.opacity(0.45) : .clear,
+                                    lineWidth: 1
+                                )
+                            )
                     }
                     .buttonStyle(.plain)
+                    .foregroundStyle(viewModel.filter == kind ? Color.accentColor : Color.secondary)
                 }
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-                .help("按 ⌘⇧⏎ 顺序粘贴队列内容")
+                Spacer()
+                if !viewModel.queue.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "list.number")
+                        Text("队列 \(viewModel.queue.count)")
+                        Button {
+                            viewModel.clearQueue()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill").font(.system(size: 9))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                    .help("按 ⌘⇧⏎ 顺序粘贴队列内容")
+                }
+                if settings.pauseCapture {
+                    Label("已暂停采集", systemImage: "pause.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
             }
-            if settings.pauseCapture {
-                Label("已暂停采集", systemImage: "pause.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+
+            if viewModel.filter == .snippet {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        Button {
+                            viewModel.changeSnippetGroup(nil)
+                        } label: {
+                            Text("全部片段")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2.5)
+                                .background(Capsule().fill(viewModel.snippetGroup == nil ? Color.purple.opacity(0.22) : Color.primary.opacity(0.06)))
+                                .foregroundStyle(viewModel.snippetGroup == nil ? Color.purple : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        ForEach(viewModel.availableSnippetGroups, id: \.self) { group in
+                            Button {
+                                viewModel.changeSnippetGroup(group)
+                            } label: {
+                                Text(group)
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2.5)
+                                    .background(Capsule().fill(viewModel.snippetGroup == group ? Color.purple.opacity(0.22) : Color.primary.opacity(0.06)))
+                                    .foregroundStyle(viewModel.snippetGroup == group ? Color.purple : Color.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button {
+                            viewModel.openNewSnippet()
+                        } label: {
+                            Label("新建片段", systemImage: "plus")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2.5)
+                                .background(Capsule().strokeBorder(Color.purple.opacity(0.4), lineWidth: 1))
+                                .foregroundStyle(Color.purple)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .modernScrollbar()
             }
         }
         .padding(.horizontal, 12)
@@ -211,8 +259,11 @@ struct ContextMenuItems: View {
         Button("复制") { viewModel.copy(item: item) }
         Button("复制为纯文本") { viewModel.copyAsPlainText(item: item) }
         Button(item.pinned ? "取消固定" : "固定 ★") { viewModel.togglePin(item) }
-        Button(item.tags.contains(FilterKind.snippetTag) ? "移出片段" : "存为片段") {
-            viewModel.toggleSnippet(item: item)
+        if item.isSnippet {
+            Button("编辑片段…") { viewModel.openEditSnippet(item: item) }
+            Button("移出片段") { viewModel.toggleSnippet(item: item) }
+        } else {
+            Button("存为片段…") { viewModel.openEditSnippet(item: item) }
         }
         if item.kind != .image {
             Button("编辑…") { viewModel.beginEdit(item: item) }

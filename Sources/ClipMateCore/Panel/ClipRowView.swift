@@ -42,6 +42,7 @@ struct ClipRowView: View, Equatable {
         lhs.item.useCount == rhs.item.useCount &&
         lhs.item.tags == rhs.item.tags &&
         lhs.item.title == rhs.item.title &&
+        lhs.item.meta == rhs.item.meta &&
         lhs.item.displayText == rhs.item.displayText &&
         lhs.thumbnail === rhs.thumbnail
     }
@@ -50,7 +51,16 @@ struct ClipRowView: View, Equatable {
         HStack(spacing: 10) {
             leading
             VStack(alignment: .leading, spacing: 2) {
-                if item.kind == .url, let title = item.title, !title.isEmpty {
+                if item.isSnippet, let title = item.title, !title.isEmpty {
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(.primary)
+                    Text(item.displayText)
+                        .font(.system(size: 10.5))
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                } else if item.kind == .url, let title = item.title, !title.isEmpty {
                     Text(title)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
@@ -74,7 +84,23 @@ struct ClipRowView: View, Equatable {
                     Text(TimeHelper.relative(item.createdAt))
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
-                    ForEach(item.tags.prefix(2), id: \.self) { tag in
+                    if let group = item.snippetGroup, !group.isEmpty {
+                        Text("🏷 \(group)")
+                            .font(.system(size: 9, weight: .medium))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.purple.opacity(0.15)))
+                            .foregroundStyle(Color.purple)
+                    }
+                    if let shortcode = item.snippetShortcode, !shortcode.isEmpty {
+                        Text("⚡️ \(shortcode)")
+                            .font(.system(size: 9, design: .monospaced))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.orange.opacity(0.15)))
+                            .foregroundStyle(Color.orange)
+                    }
+                    ForEach(item.tags.filter { $0 != FilterKind.snippetTag && $0 != item.snippetGroup }.prefix(2), id: \.self) { tag in
                         Text(tag)
                             .font(.system(size: 9))
                             .padding(.horizontal, 5)
@@ -150,6 +176,11 @@ struct ClipRowView: View, Equatable {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 18, height: 18)
                 .clipShape(RoundedRectangle(cornerRadius: 3))
+                .frame(width: 22)
+        } else if item.isSnippet {
+            Image(systemName: "bookmark.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Color.purple)
                 .frame(width: 22)
         } else {
             Image(systemName: item.kind.systemImage)

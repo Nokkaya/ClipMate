@@ -20,6 +20,18 @@ public struct ClipItem: Identifiable, Equatable, Sendable {
     public var blobName: String?
     public let displayText: String
 
+    public var isSnippet: Bool {
+        tags.contains(FilterKind.snippetTag)
+    }
+
+    public var snippetGroup: String? {
+        meta["snippet_group"]
+    }
+
+    public var snippetShortcode: String? {
+        meta["snippet_shortcode"]
+    }
+
     public init(id: Int64, kind: ClipKind, plainText: String, sourceBundle: String, sourceName: String,
                 byteSize: Int, createdAt: Date, lastUsedAt: Date, useCount: Int, pinned: Bool,
                 tags: [String], title: String? = nil, meta: [String: String],

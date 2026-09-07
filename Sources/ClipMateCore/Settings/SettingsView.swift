@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// 设置窗口：通用 / 采集 / 隐私 / AI / 关于。
+/// 设置窗口：通用 / 片段 / 采集 / 隐私 / AI / 脚本 / 关于。
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     let store: ClipStore
@@ -10,8 +10,10 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            GeneralTab(settings: settings)
+            GeneralTab(settings: settings, store: store)
                 .tabItem { Label("通用", systemImage: "gearshape") }
+            SnippetsTab(store: store)
+                .tabItem { Label("片段", systemImage: "bookmark") }
             CaptureTab(settings: settings, store: store)
                 .tabItem { Label("采集", systemImage: "doc.on.doc") }
             PrivacyTab(settings: settings, frontApps: frontApps)
@@ -23,7 +25,58 @@ struct SettingsView: View {
             AboutTab()
                 .tabItem { Label("关于", systemImage: "info.circle") }
         }
-        .frame(width: 560, height: 460)
+        .frame(width: 620, height: 500)
+    }
+}
+
+// MARK: - 数据备份与恢复辅助类
+
+@MainActor
+private enum BackupHelper {
+    static func exportBackup(store: ClipStore) {
+        let savePanel = NSSavePanel()
+        savePanel.title = "导出剪贴板历史与片段备份"
+        savePanel.nameFieldStringValue = "ClipMate-Backup-\(Int(Date().timeIntervalSince1970)).json"
+        savePanel.allowedContentTypes = [.json]
+        savePanel.canCreateDirectories = true
+        guard savePanel.runModal() == .OK, let url = savePanel.url else { return }
+        do {
+            let data = try store.exportJSON()
+            try data.write(to: url)
+            HapticHelper.generic()
+            let alert = NSAlert()
+            alert.messageText = "导出成功"
+            alert.informativeText = "已成功将 \(store.itemCount()) 条记录备份至：\n\(url.lastPathComponent)"
+            alert.runModal()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "导出失败"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    static func importBackup(store: ClipStore) {
+        let openPanel = NSOpenPanel()
+        openPanel.title = "从备份文件恢复"
+        openPanel.allowedContentTypes = [.json]
+        openPanel.canChooseFiles = true
+        openPanel.canChooseDirectories = false
+        guard openPanel.runModal() == .OK, let url = openPanel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let count = try store.importJSON(data)
+            HapticHelper.generic()
+            let alert = NSAlert()
+            alert.messageText = "恢复成功"
+            alert.informativeText = "新入库 \(count) 条记录（已有相同内容已自动跳过合并）。"
+            alert.runModal()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "恢复失败"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 }
 
@@ -31,23 +84,307 @@ struct SettingsView: View {
 
 private struct GeneralTab: View {
     @ObservedObject var settings: AppSettings
+    let store: ClipStore
 
     var body: some View {
         Form {
-            Picker("全局热键", selection: $settings.hotkeyPresetID) {
-                ForEach(AppSettings.hotkeyPresets) { preset in
-                    Text(preset.display).tag(preset.id)
+            Section("常规设置") {
+                Picker("全局热键", selection: $settings.hotkeyPresetID) {
+                    ForEach(AppSettings.hotkeyPresets) { preset in
+                        Text(preset.display).tag(preset.id)
+                    }
                 }
+                .pickerStyle(.menu)
+                Toggle("开机自动启动", isOn: $settings.launchAtLogin)
+                Toggle("捕获新内容时播放提示音", isOn: $settings.soundOnCapture)
+                Toggle("触控板触觉反馈（关键操作微震动）", isOn: $settings.hapticFeedbackEnabled)
             }
-            .pickerStyle(.menu)
-            Toggle("开机自动启动", isOn: $settings.launchAtLogin)
-            Toggle("捕获新内容时播放提示音", isOn: $settings.soundOnCapture)
-            Text("面板内快捷键：⏎ 粘贴 · ⌘⏎ 复制 · ⌥⏎ 编辑 · ⌘K AI · ⌘1-9 快贴 · Tab 切分类")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            Section("数据备份与恢复") {
+                HStack(spacing: 12) {
+                    Button {
+                        BackupHelper.exportBackup(store: store)
+                    } label: {
+                        Label("导出备份 (JSON)", systemImage: "square.and.arrow.up")
+                    }
+                    Button {
+                        BackupHelper.importBackup(store: store)
+                    } label: {
+                        Label("从备份恢复 (JSON)", systemImage: "square.and.arrow.down")
+                    }
+                }
+                Text("当前本地已记录历史 \(store.itemCount()) 条，收录片段 \(store.allSnippets().count) 条。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Text("面板快捷键：⏎ 粘贴 · ⌘⏎ 复制 · ⌥⏎ 编辑 · ⌘K AI · ⌘1-9 快贴 · Tab 切换分类")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()
+    }
+}
+
+// MARK: - 片段管理
+
+private struct SnippetsTab: View {
+    let store: ClipStore
+    @State private var snippets: [ClipItem] = []
+    @State private var groups: [String] = []
+    @State private var selectedGroup: String? = nil
+    @State private var searchKeyword = ""
+    @State private var showEditor = false
+    @State private var editingID: Int64? = nil
+    @State private var draftTitle = ""
+    @State private var draftGroup = ""
+    @State private var draftShortcode = ""
+    @State private var draftContent = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 工具栏
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("搜索片段…", text: $searchKeyword)
+                    .textFieldStyle(.plain)
+                if !searchKeyword.isEmpty {
+                    Button {
+                        searchKeyword = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+                Button {
+                    openNew()
+                } label: {
+                    Label("新建片段", systemImage: "plus")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.primary.opacity(0.03))
+
+            Divider()
+
+            // 分组胶囊
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Button {
+                        selectedGroup = nil
+                    } label: {
+                        Text("全部 (\(snippets.count))")
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(selectedGroup == nil ? Color.purple.opacity(0.2) : Color.primary.opacity(0.06)))
+                            .foregroundStyle(selectedGroup == nil ? Color.purple : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach(groups, id: \.self) { g in
+                        let count = snippets.filter { $0.snippetGroup == g }.count
+                        Button {
+                            selectedGroup = g
+                        } label: {
+                            Text("\(g) (\(count))")
+                                .font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(selectedGroup == g ? Color.purple.opacity(0.2) : Color.primary.opacity(0.06)))
+                                .foregroundStyle(selectedGroup == g ? Color.purple : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+            .modernScrollbar()
+
+            Divider()
+
+            // 片段列表
+            if filteredSnippets.isEmpty {
+                VStack(spacing: 8) {
+                    Spacer()
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 30))
+                        .foregroundStyle(.tertiary)
+                    Text(snippets.isEmpty ? "暂无片段，点击右上角新建" : "未找到匹配片段")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(filteredSnippets) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                if let title = item.title, !title.isEmpty {
+                                    Text(title)
+                                        .font(.system(size: 12.5, weight: .semibold))
+                                } else {
+                                    Text(item.displayText)
+                                        .font(.system(size: 12.5, weight: .medium))
+                                        .lineLimit(1)
+                                }
+                                if let g = item.snippetGroup, !g.isEmpty {
+                                    Text("🏷 \(g)")
+                                        .font(.system(size: 9))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.purple.opacity(0.15)))
+                                        .foregroundStyle(Color.purple)
+                                }
+                                if let sc = item.snippetShortcode, !sc.isEmpty {
+                                    Text("⚡️ \(sc)")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.orange.opacity(0.15)))
+                                        .foregroundStyle(Color.orange)
+                                }
+                                Spacer()
+                                Button {
+                                    openEdit(item: item)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    deleteSnippet(item: item)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Text(item.plainText)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+                .listStyle(.inset)
+                .modernScrollbar()
+            }
+        }
+        .onAppear { loadData() }
+        .sheet(isPresented: $showEditor) {
+            editorSheet
+        }
+    }
+
+    private var filteredSnippets: [ClipItem] {
+        snippets.filter { item in
+            if let selectedGroup, item.snippetGroup != selectedGroup { return false }
+            if !searchKeyword.isEmpty {
+                let kw = searchKeyword.lowercased()
+                let matchTitle = item.title?.lowercased().contains(kw) ?? false
+                let matchContent = item.plainText.lowercased().contains(kw)
+                let matchShortcode = item.snippetShortcode?.lowercased().contains(kw) ?? false
+                return matchTitle || matchContent || matchShortcode
+            }
+            return true
+        }
+    }
+
+    private func loadData() {
+        snippets = store.allSnippets()
+        groups = store.allSnippetGroups()
+    }
+
+    private func openNew() {
+        editingID = nil
+        draftTitle = ""
+        draftGroup = selectedGroup ?? ""
+        draftShortcode = ""
+        draftContent = ""
+        showEditor = true
+    }
+
+    private func openEdit(item: ClipItem) {
+        editingID = item.id
+        draftTitle = item.title ?? ""
+        draftGroup = item.snippetGroup ?? ""
+        draftShortcode = item.snippetShortcode ?? ""
+        draftContent = item.plainText
+        showEditor = true
+    }
+
+    private func deleteSnippet(item: ClipItem) {
+        try? store.delete(item.id)
+        loadData()
+        HapticHelper.generic()
+    }
+
+    private var editorSheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(editingID == nil ? "新建片段" : "编辑片段")
+                .font(.headline)
+            TextField("标题（如：日常开票信息、Git 常用流）", text: $draftTitle)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("分组（如：开发 / 常用 / 邮件）", text: $draftGroup)
+                    .textFieldStyle(.roundedBorder)
+                TextField("快捷短码（如：;tax）", text: $draftShortcode)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Text("片段内容")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $draftContent)
+                .font(.system(size: 12, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                .frame(height: 140)
+            HStack {
+                Button("取消") { showEditor = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("保存") {
+                    let content = draftContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !content.isEmpty else { return }
+                    if let id = editingID {
+                        _ = try? store.updateSnippet(
+                            id: id,
+                            title: draftTitle,
+                            group: draftGroup,
+                            shortcode: draftShortcode,
+                            text: content
+                        )
+                    } else {
+                        _ = try? store.createSnippet(
+                            title: draftTitle,
+                            text: content,
+                            group: draftGroup,
+                            shortcode: draftShortcode
+                        )
+                    }
+                    showEditor = false
+                    loadData()
+                    HapticHelper.feedback()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(draftContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding()
+        .frame(width: 440, height: 320)
     }
 }
 
@@ -149,6 +486,9 @@ private struct AITab: View {
     @State private var testResult = ""
     @State private var testing = false
 
+    @State private var newPromptName = ""
+    @State private var newPromptTemplate = ""
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("启用 AI 快速操作（面板内 ⌘K）", isOn: $settings.aiEnabled)
@@ -196,6 +536,66 @@ private struct AITab: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+
+            Divider()
+
+            // 自定义提示词模板
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("提示词模板（包含 {content} 占位变量）")
+                        .font(.callout)
+                    Spacer()
+                    Button("恢复精选默认模板") {
+                        settings.customPrompts = PromptTemplate.defaults
+                    }
+                    .font(.caption)
+                }
+
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(settings.customPrompts) { prompt in
+                            HStack {
+                                Label(prompt.name, systemImage: prompt.icon)
+                                    .font(.system(size: 11, weight: .medium))
+                                Spacer()
+                                Text(String(prompt.template.prefix(36)) + "…")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                Button {
+                                    settings.customPrompts.removeAll { $0.id == prompt.id }
+                                } label: {
+                                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                .frame(maxHeight: 70)
+                .modernScrollbar()
+
+                HStack {
+                    TextField("模板名（如：代码转TS）", text: $newPromptName)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11))
+                        .frame(width: 140)
+                    TextField("提示词内容（包含 {content} 占位）", text: $newPromptTemplate)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11))
+                    Button("添加") {
+                        let n = newPromptName.trimmingCharacters(in: .whitespaces)
+                        let t = newPromptTemplate.trimmingCharacters(in: .whitespaces)
+                        guard !n.isEmpty, !t.isEmpty else { return }
+                        settings.customPrompts.append(PromptTemplate(name: n, icon: "sparkle", template: t))
+                        newPromptName = ""
+                        newPromptTemplate = ""
+                    }
+                    .disabled(newPromptName.trimmingCharacters(in: .whitespaces).isEmpty || newPromptTemplate.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+
             Spacer()
             Text("启用后，剪贴板内容会发送到上面配置的端点。隐私敏感场景建议使用本地模型（如 Ollama）。")
                 .font(.caption)
