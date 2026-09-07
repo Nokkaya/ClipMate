@@ -187,6 +187,30 @@ private struct GeneralTab: View {
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
+                        SettingsRow("面板出现位置", subtitle: "选择主面板在多显示器或光标附近的定位策略") {
+                            Picker("", selection: $settings.panelPositionMode) {
+                                ForEach(PanelPositionMode.allCases) { mode in
+                                    Text(L10n.positionModeTitle(mode)).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(width: 200)
+                        }
+
+                        Divider().overlay(Color.primary.opacity(0.04))
+
+                        SettingsRow("界面显示语言", subtitle: "自定义应用程序的界面语言或自动跟随系统") {
+                            Picker("", selection: $settings.appLanguage) {
+                                ForEach(AppLanguage.allCases) { lang in
+                                    Text(L10n.languageTitle(lang)).tag(lang)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(width: 170)
+                        }
+
+                        Divider().overlay(Color.primary.opacity(0.04))
+
                         SettingsRow("开机自动启动", subtitle: "登录 macOS 系统时在后台自动启动常驻") {
                             Toggle("", isOn: $settings.launchAtLogin)
                                 .toggleStyle(.switch)
@@ -207,6 +231,7 @@ private struct GeneralTab: View {
                         }
                     }
                 }
+
 
                 // 卡片 2: 备份与恢复
                 SettingsCard(
@@ -782,6 +807,13 @@ private struct CaptureTab: View {
                 // 卡片 2: 智能识别与增强
                 SettingsCard("智能识别与元数据增强", icon: "sparkle.magnifyingglass", iconColor: .purple) {
                     VStack(spacing: 10) {
+                        SettingsRow("智能标题生成 (Smart Title)", subtitle: "自动识别代码签名、SQL、CLI命令、Markdown标题及OCR文本，展示更具辨识度的标题") {
+                            Toggle("", isOn: $settings.smartTitleEnabled)
+                                .toggleStyle(.switch)
+                        }
+
+                        Divider().overlay(Color.primary.opacity(0.04))
+
                         SettingsRow("图片文字识别 (Vision OCR)", subtitle: "复制或截取图片入库时，自动提取图中文本建立索引，图片亦可搜") {
                             Toggle("", isOn: $settings.imageOCREnabled)
                                 .toggleStyle(.switch)
@@ -795,6 +827,7 @@ private struct CaptureTab: View {
                         }
                     }
                 }
+
 
                 // 卡片 3: 检索引擎
                 SettingsCard("数据库与检索引擎", icon: "cylinder.split.1x2", iconColor: .green) {

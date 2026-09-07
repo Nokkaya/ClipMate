@@ -99,16 +99,9 @@ public enum FilterKind: String, CaseIterable {
     public static let snippetTag = "片段"
 
     public var title: String {
-        switch self {
-        case .all: return "全部"
-        case .text: return "文本"
-        case .image: return "图片"
-        case .file: return "文件"
-        case .link: return "链接"
-        case .snippet: return "片段"
-        case .pinned: return "已固定"
-        }
+        L10n.filterTitle(self)
     }
+
 
     /// 映射到 SQL 的 kind 过滤子句；nil 表示不过滤。
     var kindClause: String? {

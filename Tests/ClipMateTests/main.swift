@@ -770,7 +770,146 @@ runner.run("HapticHelper 触觉反馈安全调度") {
     runner.expectTrue(true, "触觉反馈正常执行无异常")
 }
 
+runner.run("SmartTitleGenerator 智能标题提取与截断") {
+    // 1. Swift 函数签名
+    let swiftCode = """
+    public func handleKey(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags
+        return false
+    }
+    """
+    let swiftTitle = SmartTitleGenerator.generate(for: swiftCode, kind: .text)
+    runner.expectTrue(swiftTitle != nil, "成功识别 Swift 函数")
+    runner.expectTrue(swiftTitle?.contains("handleKey") == true, "标题包含函数名 handleKey")
+    runner.expectTrue(swiftTitle?.hasPrefix("💻 ") == true, "代码标题带有标志前缀")
+
+    // 2. Python 函数
+    let pyCode = "def calculate_discount(price, rate):\n    return price * (1 - rate)"
+    let pyTitle = SmartTitleGenerator.generate(for: pyCode, kind: .text)
+    runner.expectTrue(pyTitle?.contains("calculate_discount") == true, "成功识别 Python def")
+
+    // 3. Markdown 标题
+    let md = "# 核心规划与架构目标\n\n这是本文档正文第一段..."
+    let mdTitle = SmartTitleGenerator.generate(for: md, kind: .text)
+    runner.expectEqual(mdTitle, "核心规划与架构目标", "成功提取 Markdown # 标题")
+
+    // 4. CLI 命令
+    let cli = "docker compose up -d --build"
+    let cliTitle = SmartTitleGenerator.generate(for: cli, kind: .text)
+    runner.expectTrue(cliTitle?.contains("docker compose up -d") == true, "成功识别 CLI 命令")
+
+    // 5. SQL 语句
+    let sql = "SELECT id, name, email FROM users WHERE active = 1"
+    let sqlTitle = SmartTitleGenerator.generate(for: sql, kind: .text)
+    runner.expectTrue(sqlTitle?.contains("SELECT id, name") == true, "成功识别 SQL 语句")
+
+    // 6. JSON 字段摘要
+    let jsonStr = "{\n  \"action\": \"sync_clipboard\",\n  \"count\": 12\n}"
+    let jsonTitle = SmartTitleGenerator.generate(for: jsonStr, kind: .text)
+    runner.expectEqual(jsonTitle, "JSON · action: \"sync_clipboard\"", "成功提取 JSON 顶层关键字段")
+}
+
+runner.run("AutoTagger 全格式色值识别与友好色彩名称") {
+    // 1. 3 位 Hex
+    runner.expectEqual(AutoTagger.detectColor(in: "#fff"), "#FFFFFF", "#fff 扩展为 #FFFFFF")
+    runner.expectEqual(AutoTagger.detectColor(in: "#333"), "#333333", "#333 扩展为 #333333")
+
+    // 2. 6 位 Hex
+    runner.expectEqual(AutoTagger.detectColor(in: "#4a90d9"), "#4A90D9", "6位 hex 归一化大写")
+
+    // 3. 8 位 Hex
+    runner.expectEqual(AutoTagger.detectColor(in: "#4A90D980"), "#4A90D9", "8位 hex 剥离 alpha 归一化")
+
+    // 4. rgb(r, g, b)
+    runner.expectEqual(AutoTagger.detectColor(in: "rgb(255, 0, 0)"), "#FF0000", "rgb 格式转为 #FF0000")
+    runner.expectEqual(AutoTagger.detectColor(in: "rgba(0, 255, 0, 0.5)"), "#00FF00", "rgba 格式转为 #00FF00")
+
+    // 5. 色彩语义名称
+    runner.expectEqual(AutoTagger.friendlyColorName(for: "#000000"), "纯黑", "精准识别纯黑")
+    runner.expectEqual(AutoTagger.friendlyColorName(for: "#FFFFFF"), "纯白", "精准识别纯白")
+    runner.expectEqual(AutoTagger.friendlyColorName(for: "#4A90D9"), "主题蓝", "精准识别主题蓝")
+    runner.expectEqual(AutoTagger.friendlyColorName(for: "#3B82F6"), "科技蓝", "精准识别科技蓝")
+    runner.expectEqual(AutoTagger.friendlyColorName(for: "#EF4444"), "珊瑚红", "精准识别珊瑚红")
+}
+
+runner.run("Palette 扩展色值解析") {
+    let color3 = Palette.color(hexString: "#FFF")
+    runner.expectTrue(color3 != nil, "3位色值成功生成 Color")
+    let color6 = Palette.color(hexString: "#4A90D9")
+    runner.expectTrue(color6 != nil, "6位色值成功生成 Color")
+    let color8 = Palette.color(hexString: "#4A90D980")
+    runner.expectTrue(color8 != nil, "8位色值成功生成 Color")
+}
+
+runner.run("AppSettings 面板定位、语言与智能标题持久化") {
+    let suite = "clipmate.test.\(UUID().uuidString)"
+    let testDefaults = UserDefaults(suiteName: suite)!
+    let s = AppSettings(defaults: testDefaults)
+
+    runner.expectEqual(s.panelPositionMode, .center, "默认居中模式")
+    runner.expectEqual(s.appLanguage, .system, "默认跟随系统语言")
+    runner.expectTrue(s.smartTitleEnabled, "默认启用智能标题")
+
+    s.panelPositionMode = .followCursor
+    runner.expectEqual(s.panelPositionMode, .followCursor, "更新为跟随鼠标模式")
+
+    s.appLanguage = .en
+    runner.expectEqual(s.appLanguage, .en, "更新为英文模式")
+
+    s.lastPanelPositionX = 350.0
+    s.lastPanelPositionY = 420.0
+    runner.expectEqual(s.lastPanelPositionX, 350.0, "记录 X 坐标")
+    runner.expectEqual(s.lastPanelPositionY, 420.0, "记录 Y 坐标")
+
+    // 新实例验证持久化
+    let s2 = AppSettings(defaults: testDefaults)
+    runner.expectEqual(s2.panelPositionMode, .followCursor, "持久化读取跟随光标")
+    runner.expectEqual(s2.appLanguage, .en, "持久化读取英文")
+    runner.expectEqual(s2.lastPanelPositionX, 350.0, "持久化读取坐标 X")
+    testDefaults.removePersistentDomain(forName: suite)
+}
+
+runner.run("L10n 多语言本地化字典与切换") {
+    // 验证中文
+    runner.expectEqual(L10n.filterTitle(.all, lang: .zhHans), "全部", "中文全部")
+    runner.expectEqual(L10n.filterTitle(.snippet, lang: .zhHans), "片段", "中文片段")
+    runner.expectEqual(L10n.tr("footer.paste", lang: .zhHans), "⏎ 粘贴", "中文粘贴")
+
+    // 验证英文
+    runner.expectEqual(L10n.filterTitle(.all, lang: .en), "All", "英文 All")
+    runner.expectEqual(L10n.filterTitle(.snippet, lang: .en), "Snippets", "英文 Snippets")
+    runner.expectEqual(L10n.tr("footer.paste", lang: .en), "⏎ Paste", "英文 Paste")
+
+    // 验证格式化替换
+    let formattedZh = L10n.tr("batch.selected", 5, lang: .zhHans)
+    runner.expectEqual(formattedZh, "已选 5 项", "中文参数替换")
+    let formattedEn = L10n.tr("batch.selected", 5, lang: .en)
+    runner.expectEqual(formattedEn, "5 selected", "英文参数替换")
+}
+
+runner.run("ClipStore 智能标题入库与更新") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let code = "func authenticateUser() -> Bool { return true }"
+    let (item, isNew) = try store.capture(
+        kind: .text,
+        plainText: code,
+        sourceBundle: "com.apple.dt.Xcode",
+        sourceName: "Xcode",
+        title: "💻 func authenticateUser() -> Bool"
+    )
+    runner.expectTrue(isNew, "新条目成功入库")
+    runner.expectEqual(item.title, "💻 func authenticateUser() -> Bool", "智能标题持久化成功")
+
+    // 测试 updateOCR 更新标题
+    let ocrText = "发票号码: 12345678\n金额: 500.00"
+    let updated = try store.updateOCR(item.id, text: ocrText, title: "发票号码: 12345678")
+    runner.expectEqual(updated?.title, "发票号码: 12345678", "updateOCR 成功更新条目标题")
+}
+
 print("----")
+
 if runner.failures.isEmpty {
     print("全部 \(runner.passed) 个用例通过 ✅")
 } else {

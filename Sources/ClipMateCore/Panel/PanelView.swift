@@ -56,9 +56,10 @@ struct SearchBar: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("搜索剪贴板历史…", text: $viewModel.query)
+            TextField(L10n.tr("search.placeholder"), text: $viewModel.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
+
                 .focused($focused)
             if !viewModel.query.isEmpty {
                 Button {
@@ -305,10 +306,10 @@ struct EmptyStateView: View {
             Image(systemName: query.isEmpty ? "doc.on.clipboard" : "magnifyingglass")
                 .font(.system(size: 34))
                 .foregroundStyle(.quaternary)
-            Text(query.isEmpty ? "暂无剪贴板历史" : "没有匹配的结果")
+            Text(query.isEmpty ? L10n.tr("empty.title") : L10n.tr("empty.no_match"))
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text(query.isEmpty ? "复制任意内容后会自动出现在这里" : "换个关键词试试")
+            Text(query.isEmpty ? L10n.tr("empty.subtitle") : L10n.tr("empty.no_match_sub"))
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
         }
@@ -321,23 +322,22 @@ struct EmptyStateView: View {
 struct FooterBar: View {
     var body: some View {
         HStack(spacing: 12) {
-            KeyHint("⏎", "粘贴")
-            KeyHint("⌘⏎", "复制")
-            KeyHint("⌘I", "预览")
-            KeyHint("⇧⏎", "入队")
-            KeyHint("⌘⇧⏎", "连贴")
+            KeyHint("⏎", L10n.tr("footer.paste"))
+            KeyHint("⌘⏎", L10n.tr("footer.copy"))
+            KeyHint("⌘I", L10n.tr("footer.preview"))
+            KeyHint("⇧⏎", L10n.tr("batch.paste_queue"))
             KeyHint("⌘⌥⏎", "纯文本")
-            KeyHint("⌘K", "AI")
-            KeyHint("⇧↑↓", "多选")
-            KeyHint("⌫", "删除")
+            KeyHint("⌘K", L10n.tr("footer.ai"))
+            KeyHint("⌫", L10n.tr("footer.delete"))
             Spacer()
-            KeyHint("Esc", "隐藏")
+            KeyHint("Esc", L10n.tr("batch.cancel"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(Color.primary.opacity(0.04))
     }
 }
+
 
 private struct KeyHint: View {
     let key: String
@@ -369,7 +369,7 @@ struct BatchActionBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("已选 \(viewModel.multiSelectedIDs.count) 项")
+            Text(L10n.tr("batch.selected", viewModel.multiSelectedIDs.count))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
 
@@ -378,7 +378,7 @@ struct BatchActionBar: View {
             Button {
                 viewModel.copyMulti()
             } label: {
-                Label("合并复制 (⌘C)", systemImage: "doc.on.doc")
+                Label(L10n.tr("batch.copy_all"), systemImage: "doc.on.doc")
                     .font(.system(size: 11))
             }
             .buttonStyle(.borderedProminent)
@@ -387,7 +387,7 @@ struct BatchActionBar: View {
             Button {
                 viewModel.togglePinMulti()
             } label: {
-                Label("批量固定 (⌘P)", systemImage: "pin")
+                Label(L10n.tr("batch.pin_all"), systemImage: "pin")
                     .font(.system(size: 11))
             }
             .buttonStyle(.bordered)
@@ -396,7 +396,7 @@ struct BatchActionBar: View {
             Button {
                 viewModel.enqueueMulti()
             } label: {
-                Label("加入队列", systemImage: "list.number")
+                Label(L10n.tr("batch.paste_queue"), systemImage: "list.number")
                     .font(.system(size: 11))
             }
             .buttonStyle(.bordered)
@@ -405,7 +405,7 @@ struct BatchActionBar: View {
             Button(role: .destructive) {
                 viewModel.deleteMulti()
             } label: {
-                Label("批量删除 (⌫)", systemImage: "trash")
+                Label(L10n.tr("batch.delete_all"), systemImage: "trash")
                     .font(.system(size: 11))
             }
             .buttonStyle(.bordered)
@@ -414,16 +414,16 @@ struct BatchActionBar: View {
             Button {
                 viewModel.clearMultiSelection()
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                Label(L10n.tr("batch.cancel"), systemImage: "xmark")
+                    .font(.system(size: 11))
             }
-            .buttonStyle(.plain)
-            .help("取消多选 (Esc)")
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
         .background(Color.accentColor.opacity(0.12))
     }
 }
+
 

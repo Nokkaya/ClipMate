@@ -70,6 +70,7 @@ public final class ClipStore {
                         sourceBundle: String,
                         sourceName: String,
                         tags: [String] = [],
+                        title: String? = nil,
                         inlineData: Data? = nil,
                         imageOriginal: Data? = nil,
                         meta: [String: String] = [:],
@@ -111,17 +112,19 @@ public final class ClipStore {
         let insert = try db.prepare("""
             INSERT INTO clip (kind, plain_text, source_bundle, source_name, content_hash, byte_size,
                 created_at, last_used_at, use_count, pinned, title, tags, meta, inline_data, blob_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)
             """)
         insert.bind([
             .text(kind.rawValue), .text(plainText), .text(sourceBundle), .text(sourceName),
             .blob(hashData), .int(Int64(content.count)), .double(timestamp), .double(timestamp),
+            .text(title),
             .text(json(tags)), .text(json(meta)), .blob(inlineData), .text(blobName),
         ])
         try insert.run()
         guard let item = item(id: db.lastInsertRowID) else { throw StoreError.sql("插入后读取失败") }
         return (item, true)
     }
+
 
     // MARK: - 查询
 
@@ -338,7 +341,7 @@ public final class ClipStore {
 
     /// 异步 OCR 识别完成后补充文字信息与标签，触发 FTS5 自动索引更新
     @discardableResult
-    public func updateOCR(_ id: Int64, text: String) throws -> ClipItem? {
+    public func updateOCR(_ id: Int64, text: String, title: String? = nil) throws -> ClipItem? {
         guard let existing = item(id: id) else { return nil }
         var tags = existing.tags
         if !tags.contains("OCR") {
@@ -346,13 +349,15 @@ public final class ClipStore {
         }
         var meta = existing.meta
         meta["ocr"] = "1"
+        let newTitle = title ?? existing.title
         let statement = try db.prepare("""
-            UPDATE clip SET plain_text = ?, tags = ?, meta = ? WHERE id = ?
+            UPDATE clip SET plain_text = ?, tags = ?, meta = ?, title = ? WHERE id = ?
             """)
-        statement.bind([.text(text), .text(json(tags)), .text(json(meta)), .int(id)])
+        statement.bind([.text(text), .text(json(tags)), .text(json(meta)), .text(newTitle), .int(id)])
         try statement.run()
         return item(id: id)
     }
+
 
     /// 异步抓取到网页元数据（标题、Favicon 图标）后更新条目
     @discardableResult

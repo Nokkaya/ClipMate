@@ -66,6 +66,10 @@ public final class ClipboardMonitor {
             guard NSPasteboard.general.changeCount == changeCount else { return }
 
             // 优化：大文件落盘、哈希计算、SQLite 插入与 FTS5 分词在后台完成，避免主线程磁盘 I/O 阻塞
+            let smartTitle: String? = self.settings.smartTitleEnabled
+                ? SmartTitleGenerator.generate(for: content.plainText, kind: content.kind)
+                : nil
+
             do {
                 let result = try self.store.capture(
                     kind: content.kind,
@@ -73,6 +77,7 @@ public final class ClipboardMonitor {
                     sourceBundle: bundleID,
                     sourceName: appName,
                     tags: content.tags,
+                    title: smartTitle,
                     inlineData: content.inlineData,
                     imageOriginal: content.imageOriginal,
                     meta: content.meta
@@ -89,8 +94,12 @@ public final class ClipboardMonitor {
                         guard let self else { return }
                         guard let text = ClipboardReader.recognizeText(in: originalData) else { return }
                         let ocrText = String(text.prefix(4000))
+                        let ocrTitle: String? = self.settings.smartTitleEnabled
+                            ? (SmartTitleGenerator.generate(for: ocrText, kind: .text)
+                               ?? ocrText.components(separatedBy: .newlines).first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }).map { String($0.prefix(40)) })
+                            : nil
                         do {
-                            if let updatedItem = try self.store.updateOCR(itemId, text: ocrText) {
+                            if let updatedItem = try self.store.updateOCR(itemId, text: ocrText, title: ocrTitle) {
                                 DispatchQueue.main.async {
                                     self.onItemUpdated?(updatedItem)
                                 }
@@ -100,6 +109,7 @@ public final class ClipboardMonitor {
                         }
                     }
                 }
+
 
                 // 链接元数据抓取（标题 + Favicon）：后台异步低优先级任务，失败静默降级
                 if content.kind == .url && self.settings.fetchLinkMetadata && (result.isNew || result.item.title == nil),

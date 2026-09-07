@@ -51,30 +51,29 @@ struct ClipRowView: View, Equatable {
         HStack(spacing: 10) {
             leading
             VStack(alignment: .leading, spacing: 2) {
-                if item.isSnippet, let title = item.title, !title.isEmpty {
+                if let title = item.title, !title.isEmpty {
                     Text(title)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
                         .foregroundStyle(.primary)
-                    Text(item.displayText)
-                        .font(.system(size: 10.5))
-                        .lineLimit(1)
-                        .foregroundStyle(.secondary)
-                } else if item.kind == .url, let title = item.title, !title.isEmpty {
-                    Text(title)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                        .foregroundStyle(.primary)
-                    Text(item.plainText)
-                        .font(.system(size: 10.5))
-                        .lineLimit(1)
-                        .foregroundStyle(.secondary)
+                    let subtitleText: String = {
+                        if item.kind == .url { return item.plainText }
+                        if item.kind == .image { return item.meta["display"] ?? item.plainText }
+                        return item.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }()
+                    if !subtitleText.isEmpty && subtitleText != title {
+                        Text(subtitleText)
+                            .font(.system(size: 10.5))
+                            .lineLimit(1)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     Text(item.displayText)
                         .font(.system(size: 13))
                         .lineLimit(2)
                         .foregroundStyle(item.kind == .image ? .secondary : .primary)
                 }
+
                 HStack(spacing: 6) {
                     if !item.sourceName.isEmpty {
                         Text(item.sourceName)
@@ -159,7 +158,9 @@ struct ClipRowView: View, Equatable {
                 .fill(swatch)
                 .frame(width: 20, height: 20)
                 .overlay(Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
+                .shadow(color: swatch.opacity(0.4), radius: 3, y: 1)
                 .frame(width: 22)
+
         } else if item.kind == .image, let thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()

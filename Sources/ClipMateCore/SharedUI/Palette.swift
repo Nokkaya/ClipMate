@@ -4,7 +4,8 @@ import AppKit
 /// 配色板。
 /// 原则：类型标识色用低饱和、亮暗自适应的定制色调，保证在毛玻璃底上不刺眼、层次清晰；
 /// 交互控件（按钮/选中态/焦点）跟随系统强调色，保持 macOS 原生一致性。
-enum Palette {
+public enum Palette {
+
     /// 0xRRGGBB 亮/暗双态自适应颜色。
     static func adaptive(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -31,17 +32,33 @@ enum Palette {
     /// 破坏性操作。
     static let danger = Color.red
 
-    /// "#RRGGBB" / "RRGGBB" → Color（用于色值条目的色卡展示）。
-    static func color(hexString: String) -> Color? {
+    /// "#RGB" / "#RRGGBB" / "#RRGGBBAA" → Color（用于色值条目的色卡展示）。
+    public static func color(hexString: String) -> Color? {
+
         var hex = hexString.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "#", with: "")
         if hex.hasPrefix("0x") { hex.removeFirst(2) }
-        guard hex.count == 6, let value = UInt64(hex, radix: 16) else { return nil }
-        return Color(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255
-        )
+        if hex.count == 3 {
+            hex = hex.map { "\($0)\($0)" }.joined()
+        }
+        if hex.count == 6 {
+            guard let value = UInt64(hex, radix: 16) else { return nil }
+            return Color(
+                red: Double((value >> 16) & 0xFF) / 255,
+                green: Double((value >> 8) & 0xFF) / 255,
+                blue: Double(value & 0xFF) / 255
+            )
+        } else if hex.count == 8 {
+            guard let value = UInt64(hex, radix: 16) else { return nil }
+            return Color(
+                red: Double((value >> 24) & 0xFF) / 255,
+                green: Double((value >> 16) & 0xFF) / 255,
+                blue: Double((value >> 8) & 0xFF) / 255,
+                opacity: Double(value & 0xFF) / 255
+            )
+        }
+        return nil
     }
+
 }
 
 extension NSColor {

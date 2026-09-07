@@ -45,6 +45,7 @@ final class PanelController {
         panel.hasShadow = false
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         viewModel.dismiss = { [weak self] in self?.hidePanel() }
@@ -63,7 +64,19 @@ final class PanelController {
             if NSApp.keyWindow === self?.aiWorkspace?.panel { return }
             self?.hidePanel()
         }
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.panel.isVisible else { return }
+            let origin = self.panel.frame.origin
+            self.viewModel.settings.lastPanelPositionX = origin.x
+            self.viewModel.settings.lastPanelPositionY = origin.y
+        }
     }
+
 
     func togglePanel() {
         panel.isVisible ? hidePanel() : showPanel()
@@ -109,13 +122,53 @@ final class PanelController {
     }
 
     private func positionPanel() {
-        guard let screen = NSScreen.main else { return }
+        let mouseLoc = NSEvent.mouseLocation
+        let activeScreen = NSScreen.screens.first { NSMouseInRect(mouseLoc, $0.frame, false) }
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        guard let screen = activeScreen else { return }
+
         let size = panel.frame.size
         let visible = screen.visibleFrame
-        let x = visible.midX - size.width / 2
-        let y = visible.midY - size.height * 0.58
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+
+        switch viewModel.settings.panelPositionMode {
+        case .center:
+            let x = visible.midX - size.width / 2
+            let y = visible.midY - size.height * 0.58
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+
+        case .followCursor:
+            let targetX = mouseLoc.x - size.width / 2
+            var targetY = mouseLoc.y - size.height - 12
+
+            if targetY < visible.minY {
+                targetY = mouseLoc.y + 12
+            }
+            let minX = visible.minX + 8
+            let maxX = max(minX, visible.maxX - size.width - 8)
+            let minY = visible.minY + 8
+            let maxY = max(minY, visible.maxY - size.height - 8)
+            let clampedX = min(max(targetX, minX), maxX)
+            let clampedY = min(max(targetY, minY), maxY)
+            panel.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
+
+        case .remember:
+            if let lastX = viewModel.settings.lastPanelPositionX,
+               let lastY = viewModel.settings.lastPanelPositionY {
+                let targetOrigin = NSPoint(x: lastX, y: lastY)
+                let panelRect = NSRect(origin: targetOrigin, size: size)
+                // 确保记忆的坐标在某块屏幕的可视区域内，防止外接屏拔掉后窗口移出屏幕
+                if NSScreen.screens.contains(where: { $0.visibleFrame.intersects(panelRect) }) {
+                    panel.setFrameOrigin(targetOrigin)
+                    return
+                }
+            }
+            let x = visible.midX - size.width / 2
+            let y = visible.midY - size.height * 0.58
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        }
     }
+
 
     // MARK: - 键盘（键盘优先交互的核心）
 

@@ -10,6 +10,23 @@ public struct HotkeyPreset: Identifiable, Equatable {
     public let display: String
 }
 
+public enum PanelPositionMode: String, CaseIterable, Identifiable, Codable {
+    case center = "center"
+    case followCursor = "followCursor"
+    case remember = "remember"
+
+    public var id: String { rawValue }
+}
+
+public enum AppLanguage: String, CaseIterable, Identifiable, Codable {
+    case system = "system"
+    case zhHans = "zhHans"
+    case en = "en"
+
+    public var id: String { rawValue }
+}
+
+
 /// 用户自定义脚本动作：剪贴板文本经 stdin 传入命令，stdout 作为结果。
 public struct ScriptAction: Codable, Identifiable, Equatable {
     public var id: String
@@ -107,6 +124,22 @@ public final class AppSettings: ObservableObject {
             }
         }
     }
+    @Published public var panelPositionMode: PanelPositionMode {
+        didSet { defaults.set(panelPositionMode.rawValue, forKey: "panelPositionMode") }
+    }
+    @Published public var smartTitleEnabled: Bool {
+        didSet { defaults.set(smartTitleEnabled, forKey: "smartTitleEnabled") }
+    }
+    @Published public var appLanguage: AppLanguage {
+        didSet { defaults.set(appLanguage.rawValue, forKey: "appLanguage") }
+    }
+    @Published public var lastPanelPositionX: Double? {
+        didSet { defaults.set(lastPanelPositionX, forKey: "lastPanelPositionX") }
+    }
+    @Published public var lastPanelPositionY: Double? {
+        didSet { defaults.set(lastPanelPositionY, forKey: "lastPanelPositionY") }
+    }
+
 
     /// API Key 只进 Keychain，不落 UserDefaults。
     public var aiAPIKey: String {
@@ -138,6 +171,9 @@ public final class AppSettings: ObservableObject {
             "imageOCREnabled": true,
             "semanticSearchEnabled": true,
             "fetchLinkMetadata": true,
+            "panelPositionMode": "center",
+            "smartTitleEnabled": true,
+            "appLanguage": "system",
         ])
         hotkeyPresetID = defaults.string(forKey: "hotkeyPresetID") ?? "cmdShiftV"
         retentionMaxItems = defaults.integer(forKey: "retentionMaxItems")
@@ -154,6 +190,22 @@ public final class AppSettings: ObservableObject {
         imageOCREnabled = defaults.object(forKey: "imageOCREnabled") as? Bool ?? true
         semanticSearchEnabled = defaults.object(forKey: "semanticSearchEnabled") as? Bool ?? true
         fetchLinkMetadata = defaults.object(forKey: "fetchLinkMetadata") as? Bool ?? true
+        let modeRaw = defaults.string(forKey: "panelPositionMode") ?? "center"
+        panelPositionMode = PanelPositionMode(rawValue: modeRaw) ?? .center
+        smartTitleEnabled = defaults.object(forKey: "smartTitleEnabled") as? Bool ?? true
+        let langRaw = defaults.string(forKey: "appLanguage") ?? "system"
+        appLanguage = AppLanguage(rawValue: langRaw) ?? .system
+        if defaults.object(forKey: "lastPanelPositionX") != nil {
+            lastPanelPositionX = defaults.double(forKey: "lastPanelPositionX")
+        } else {
+            lastPanelPositionX = nil
+        }
+        if defaults.object(forKey: "lastPanelPositionY") != nil {
+            lastPanelPositionY = defaults.double(forKey: "lastPanelPositionY")
+        } else {
+            lastPanelPositionY = nil
+        }
+
         if let scriptData = defaults.data(forKey: "customScripts") {
             customScripts = (try? JSONDecoder().decode([ScriptAction].self, from: scriptData)) ?? []
         } else {
