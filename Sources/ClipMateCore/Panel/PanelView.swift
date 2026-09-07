@@ -194,7 +194,7 @@ struct ClipList: View {
                     proxy.scrollTo(newID)
                 }
             }
-            .scrollIndicators(.hidden)
+            .modernScrollbar()
         }
     }
 }

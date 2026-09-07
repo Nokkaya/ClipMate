@@ -114,7 +114,7 @@ struct PreviewOverlay: View {
                 .textSelection(.enabled)
         }
         .frame(maxHeight: 240)
-        .scrollIndicators(.hidden)
+        .modernScrollbar()
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
     }
@@ -178,6 +178,7 @@ struct PreviewOverlay: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 120)
+                .modernScrollbar()
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
             }
@@ -221,7 +222,7 @@ struct PreviewOverlay: View {
                 }
             }
             .frame(maxHeight: 240)
-            .scrollIndicators(.hidden)
+            .modernScrollbar()
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
         }
@@ -260,7 +261,7 @@ struct PreviewOverlay: View {
                 .padding(8)
             }
             .frame(maxHeight: 240)
-            .scrollIndicators(.hidden)
+            .modernScrollbar()
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
         }
     }
@@ -325,7 +326,7 @@ struct PreviewOverlay: View {
                     .textSelection(.enabled)
             }
             .frame(maxHeight: 100)
-            .scrollIndicators(.hidden)
+            .modernScrollbar()
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Palette.text.opacity(0.06)))
