@@ -33,6 +33,8 @@ public final class PanelViewModel: ObservableObject {
     var openSettings: (() -> Void)?
 
     private var searchTask: Task<Void, Never>?
+    /// 选中锚点：以条目 id 记录，列表重排（新采集置顶等）后选中不漂移。
+    private var selectedID: Int64?
     private let thumbCache = NSCache<NSNumber, NSImage>()
 
     public init(store: ClipStore, settings: AppSettings, monitor: ClipboardMonitor,
@@ -48,9 +50,13 @@ public final class PanelViewModel: ObservableObject {
 
     public func reload() {
         items = store.search(query: query, filter: filter, limit: 300)
-        if selectedIndex >= items.count {
+        // 选中按 id 锚定：原条目仍可见则保持，否则退回按行号钳制
+        if let id = selectedID, let index = items.firstIndex(where: { $0.id == id }) {
+            selectedIndex = index
+        } else if selectedIndex >= items.count {
             selectedIndex = max(0, items.count - 1)
         }
+        selectedID = items.indices.contains(selectedIndex) ? items[selectedIndex].id : nil
         // 多选/悬停只对当前可见列表有意义，清理失效引用
         let visibleIDs = Set(items.map(\.id))
         multiSelectedIDs.formIntersection(visibleIDs)
@@ -81,6 +87,7 @@ public final class PanelViewModel: ObservableObject {
     public func moveSelection(_ delta: Int) {
         guard !items.isEmpty else { return }
         selectedIndex = min(max(0, selectedIndex + delta), items.count - 1)
+        selectedID = items[selectedIndex].id
     }
 
     public func cycleFilter() {
@@ -101,6 +108,7 @@ public final class PanelViewModel: ObservableObject {
     public func selectOnly(at index: Int) {
         guard items.indices.contains(index) else { return }
         selectedIndex = index
+        selectedID = items[index].id
         clearMultiSelection()
     }
 
@@ -254,6 +262,7 @@ public final class PanelViewModel: ObservableObject {
         }
         let next = min(max(0, selectedIndex + delta), items.count - 1)
         selectedIndex = next
+        selectedID = items[next].id
         multiSelectedIDs.insert(items[next].id)
     }
 

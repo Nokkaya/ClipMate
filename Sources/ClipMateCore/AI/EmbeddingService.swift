@@ -49,16 +49,20 @@ public enum EmbeddingService {
 }
 
 /// 后台向量补算：启动时对新条目批量补算，采集后单条补算。低优先级串行队列，不阻塞采集与 UI。
+/// 注意：store 必须使用独立数据库连接（WAL 多连接），
+/// 否则补算写入会与主线程查询争抢同一连接，导致筛选/搜索卡顿。
 final class EmbeddingBackfill {
     private let store: ClipStore
     private let queue = DispatchQueue(label: "clipmate.embedding", qos: .utility)
     private var pending = false
+    private let onFinished: (() -> Void)?
 
-    init(store: ClipStore) {
+    init(store: ClipStore, onFinished: (() -> Void)? = nil) {
         self.store = store
+        self.onFinished = onFinished
     }
 
-    /// 启动全量补算（最多 2000 条/轮），完成后停止。
+    /// 启动全量补算（最多 2000 条/轮），分批让渡，完成后回调刷新主实例缓存。
     func backfillAll() {
         queue.async { [weak self] in
             guard let self else { return }
@@ -75,6 +79,10 @@ final class EmbeddingBackfill {
                     }
                     budget -= 1
                 }
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+            if let onFinished = self.onFinished {
+                DispatchQueue.main.async { onFinished() }
             }
         }
     }

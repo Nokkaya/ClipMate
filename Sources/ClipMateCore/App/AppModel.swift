@@ -32,7 +32,16 @@ final class AppModel {
             ? { EmbeddingService.embed(text: $0) }
             : nil
         store = try ClipStore(database: database, blobStore: blobStore, embeddingProvider: embeddingProvider)
-        embeddingBackfill = embeddingProvider == nil ? nil : EmbeddingBackfill(store: store)
+        if embeddingProvider != nil {
+            // 补算使用独立数据库连接：WAL 多连接下后台写入不阻塞主线程查询
+            let backfillDatabase = try Database(url: base.appendingPathComponent("clipmate.sqlite"))
+            let backfillStore = try ClipStore(database: backfillDatabase, blobStore: blobStore)
+            embeddingBackfill = EmbeddingBackfill(store: backfillStore) { [weak self] in
+                self?.store.invalidateEmbeddingCache()
+            }
+        } else {
+            embeddingBackfill = nil
+        }
         ai = AIService(settings: settings)
         monitor = ClipboardMonitor(settings: settings, store: store)
         frontApps = FrontAppTracker()

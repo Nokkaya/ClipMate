@@ -122,7 +122,7 @@ public final class ClipStore {
             let vectors = embeddingVectors()
             guard !vectors.isEmpty else { return textResults }
 
-            // 语义召回：余弦相似度，取 top 2×limit
+            // 语义召回：余弦相似度，取 top limit
             guard let queryData = provider(trimmed),
                   let queryVector = Self.vectors(from: queryData) else { return textResults }
             var candidates: [(id: Int64, score: Float)] = []
@@ -134,19 +134,22 @@ public final class ClipStore {
             }
             guard !candidates.isEmpty else { return textResults }
             candidates.sort { $0.score > $1.score }
-            let vectorIDs = candidates.prefix(limit * 2).map(\.id)
+            let vectorRankIDs = candidates.prefix(limit).map(\.id)
 
             // RRF 融合两路排名
             var scores: [Int64: Double] = [:]
             for (rank, item) in textResults.enumerated() {
                 scores[item.id, default: 0] += 1.0 / Double(60 + rank)
             }
-            var itemMap = Dictionary(uniqueKeysWithValues: textResults.map { ($0.id, $0) })
-            for (rank, id) in vectorIDs.enumerated() {
+            for (rank, id) in vectorRankIDs.enumerated() {
                 scores[id, default: 0] += 1.0 / Double(60 + rank)
-                if itemMap[id] == nil, let fetched = item(id: id), matchesFilter(fetched, filter) {
-                    itemMap[id] = fetched
-                }
+            }
+
+            // 仅对缺失条目做一次批量取回（替代逐条 item(id:)），并应用类别过滤
+            var itemMap = Dictionary(uniqueKeysWithValues: textResults.map { ($0.id, $0) })
+            let missing = vectorRankIDs.filter { itemMap[$0] == nil }
+            for fetched in items(ids: missing) where matchesFilter(fetched, filter) {
+                itemMap[fetched.id] = fetched
             }
             return scores
                 .compactMap { id, score -> (ClipItem, Double)? in
@@ -230,6 +233,20 @@ public final class ClipStore {
             result.append((statement.columnInt(0), statement.columnText(1) ?? ""))
         }
         return result
+    }
+
+    /// 按 id 批量取回（一次查询，供语义候选拼装）。
+    public func items(ids: [Int64]) -> [ClipItem] {
+        guard !ids.isEmpty else { return [] }
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        guard let statement = try? db.prepare("SELECT * FROM clip WHERE id IN (\(placeholders))") else { return [] }
+        statement.bind(ids.map { .int($0) })
+        return collect(statement)
+    }
+
+    /// 后台补算写入后由主实例调用，刷新向量缓存。
+    public func invalidateEmbeddingCache() {
+        embeddingCache = nil
     }
 
     public func setEmbedding(_ id: Int64, _ data: Data) {
