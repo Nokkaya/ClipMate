@@ -106,3 +106,14 @@ Sources/
 
 - OpenAI：`https://api.openai.com/v1` + 模型 `gpt-4o-mini` + API Key
 - Ollama（本地、免费、隐私）：`http://localhost:11434/v1` + 模型如 `qwen2.5:7b`，Key 留空
+
+## 辅助功能权限说明（开发期）
+
+`make-app.sh` 采用 ad-hoc 临时签名，**每次重新打包后 macOS 会将应用视为新程序，辅助功能授权作废并再次弹窗**——这是 TCC 机制按代码签名记录授权导致的开发期正常现象。恢复步骤：
+
+```bash
+./reset-permission.sh   # 清除残留授权并打开系统设置 → 辅助功能
+# 在列表中删除旧的 ClipMate 条目（如有灰色的）→ + 添加 dist/ClipMate.app → 打开开关
+```
+
+正式分发使用 Developer ID 证书签名后，授权按开发者团队身份记录，重新构建不再失效。
