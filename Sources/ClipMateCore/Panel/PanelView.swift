@@ -180,6 +180,7 @@ struct ClipList: View {
             .onChange(of: viewModel.selectedIndex) { newValue in
                 proxy.scrollTo(newValue, anchor: .center)
             }
+            .scrollIndicators(.hidden)
         }
     }
 }

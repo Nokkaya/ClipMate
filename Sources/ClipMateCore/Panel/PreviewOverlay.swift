@@ -106,6 +106,7 @@ struct PreviewOverlay: View {
                     .textSelection(.enabled)
             }
             .frame(maxHeight: 240)
+            .scrollIndicators(.hidden)
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
         }
@@ -124,6 +125,7 @@ struct PreviewOverlay: View {
                     .textSelection(.enabled)
             }
             .frame(maxHeight: 100)
+            .scrollIndicators(.hidden)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Palette.text.opacity(0.06)))

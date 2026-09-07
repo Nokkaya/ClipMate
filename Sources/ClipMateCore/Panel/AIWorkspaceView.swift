@@ -96,6 +96,7 @@ struct AIWorkspaceView: View {
                         .textSelection(.enabled)
                 }
                 .frame(height: 76)
+                .scrollIndicators(.hidden)
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
@@ -203,6 +204,7 @@ struct AIWorkspaceView: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.1)))
+        .scrollIndicators(.hidden)
     }
 
     private var outputPlaceholder: String {

@@ -12,6 +12,7 @@ struct EditOverlay: View {
                 TextEditor(text: $viewModel.editText)
                     .font(.system(size: 13))
                     .scrollContentBackground(.hidden)
+                    .scrollIndicators(.hidden)
                     .padding(6)
                     .frame(maxWidth: .infinity, minHeight: 170)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
