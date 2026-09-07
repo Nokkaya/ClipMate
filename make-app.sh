@@ -41,12 +41,13 @@ cp "$BIN_PATH/ClipMate" "$APP/Contents/MacOS/ClipMate"
 # 没有则退回 ad-hoc（每次重新打包辅助功能授权会失效，需重新添加）。
 SIGN_IDENTITY="ClipMate Dev"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "ClipMate Dev"; then
-    codesign --force --sign "$SIGN_IDENTITY" "$APP"
-    echo "==> 使用「$SIGN_IDENTITY」签名：辅助功能授权跨构建保持有效"
+    codesign --force --sign "${SIGN_IDENTITY}" "$APP"
+    echo "==> 已使用证书签名：${SIGN_IDENTITY}"
+    echo "    辅助功能授权按证书记录，重新打包不再失效"
 else
     codesign --force --sign - "$APP"
-    echo "==> ad-hoc 签名（提示：重新打包后需重新授权辅助功能；"
-    echo "    在钥匙串访问创建名为 ClipMate Dev 的代码签名证书可永久解决）"
+    echo "==> ad-hoc 签名：每次重新打包辅助功能授权会失效"
+    echo "    运行 scripts/make-dev-cert.sh 创建证书可永久解决"
 fi
 
 echo "==> 完成：$APP"
