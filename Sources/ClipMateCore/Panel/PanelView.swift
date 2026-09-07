@@ -158,6 +158,8 @@ struct ClipList: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
+                ModernScrollViewConfigurator()
+                    .frame(width: 0, height: 0)
                 LazyVStack(spacing: 2) {
                     ForEach(viewModel.items) { item in
                         ClipRowView(

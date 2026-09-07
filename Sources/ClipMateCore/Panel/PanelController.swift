@@ -6,6 +6,14 @@ final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
+/// 自动监听布局并将内部任意 NSScrollView 改造为透明毛玻璃现代滚动条的 HostingView
+final class AutoConfiguringHostingView<Content: View>: NSHostingView<Content> {
+    override func layout() {
+        super.layout()
+        ModernScrollViewConfigurator.configureAllScrollViews(in: self)
+    }
+}
+
 /// 非激活式悬浮面板：唤起时激活本 App 以接收键盘（accessory 应用无 Dock 图标），
 /// 关闭时 hide() 把焦点还给上一个应用；粘贴目标在唤起前就已记录。
 final class PanelController {
@@ -42,7 +50,7 @@ final class PanelController {
         viewModel.dismiss = { [weak self] in self?.hidePanel() }
         viewModel.openSettings = { [weak self] in self?.onOpenSettings?() }
 
-        let hosting = NSHostingView(rootView: PanelView(viewModel: viewModel))
+        let hosting = AutoConfiguringHostingView(rootView: PanelView(viewModel: viewModel))
         hosting.autoresizingMask = [.width, .height]
         panel.contentView = hosting
 
@@ -71,6 +79,9 @@ final class PanelController {
         }
         viewModel.reload()
         positionPanel()
+        if let contentView = panel.contentView {
+            ModernScrollViewConfigurator.configureAllScrollViews(in: contentView)
+        }
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         installKeyMonitor()
