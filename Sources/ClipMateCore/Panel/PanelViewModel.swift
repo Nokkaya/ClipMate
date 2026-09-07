@@ -51,6 +51,12 @@ public final class PanelViewModel: ObservableObject {
         if selectedIndex >= items.count {
             selectedIndex = max(0, items.count - 1)
         }
+        // 多选/悬停只对当前可见列表有意义，清理失效引用
+        let visibleIDs = Set(items.map(\.id))
+        multiSelectedIDs.formIntersection(visibleIDs)
+        if let hover = hoverIndex, hover >= items.count {
+            hoverIndex = nil
+        }
     }
 
     public func queryChanged() {
@@ -80,8 +86,22 @@ public final class PanelViewModel: ObservableObject {
     public func cycleFilter() {
         let all = FilterKind.allCases
         guard let index = all.firstIndex(of: filter) else { return }
-        filter = all[(index + 1) % all.count]
+        changeFilter(all[(index + 1) % all.count])
+    }
+
+    /// 切换分类：多选属于某个列表视图的状态，切换时一并清除。
+    public func changeFilter(_ kind: FilterKind) {
+        guard filter != kind else { return }
+        filter = kind
+        clearMultiSelection()
         reload()
+    }
+
+    /// 单选语义：点击行 = 只选中这一行，清除批量多选残留。
+    public func selectOnly(at index: Int) {
+        guard items.indices.contains(index) else { return }
+        selectedIndex = index
+        clearMultiSelection()
     }
 
     // MARK: - 动作
@@ -111,7 +131,7 @@ public final class PanelViewModel: ObservableObject {
 
     public func pasteIndex(_ index: Int) {
         guard items.indices.contains(index) else { return }
-        selectedIndex = index
+        selectOnly(at: index)
         paste(item: items[index])
     }
 

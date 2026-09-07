@@ -90,8 +90,7 @@ struct FilterChips: View {
         HStack(spacing: 6) {
             ForEach(FilterKind.allCases, id: \.self) { kind in
                 Button {
-                    viewModel.filter = kind
-                    viewModel.reload()
+                    viewModel.changeFilter(kind)
                 } label: {
                     Text(kind.title)
                         .font(.system(size: 11, weight: .medium))
@@ -163,11 +162,10 @@ struct ClipList: View {
                         )
                         .id(index)
                         .onTapGesture(count: 2) {
-                            viewModel.selectedIndex = index
                             viewModel.pasteIndex(index)
                         }
                         .onTapGesture {
-                            viewModel.selectedIndex = index
+                            viewModel.selectOnly(at: index)
                         }
                         .onHover { hovering in
                             viewModel.hoverIndex = hovering ? index : (viewModel.hoverIndex == index ? nil : viewModel.hoverIndex)
