@@ -529,6 +529,56 @@ runner.run("AutoTagger 大体积防爆与超长文本标签") {
     runner.expectTrue(durationTags < 20.0, "1MB 大文本采样标签耗时小于 20ms，实际 \(String(format: "%.2f", durationTags))ms")
 }
 
+runner.run("按需延迟加载 inlineData 与列表查询投影瘦身") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let dummyInline = Data([0x01, 0x02, 0x03, 0x04])
+    let captured = try store.capture(
+        kind: .image, plainText: "", sourceBundle: "app", sourceName: "App",
+        tags: ["图片"], inlineData: dummyInline, meta: [:]
+    )
+    runner.expectEqual(captured.item.inlineData, dummyInline, "单条 capture/item 返回 inlineData")
+
+    // 列表搜索应使用瘦身投影，不拉取 inlineData
+    let listResults = store.search(query: "", filter: .image, limit: 10)
+    runner.expectEqual(listResults.count, 1, "命中列表记录")
+    runner.expectTrue(listResults.first?.inlineData == nil, "列表查询瘦身投影：inlineData 为 nil 以节省内存与 I/O")
+
+    // 按需读取
+    let fetchedInline = store.inlineData(for: captured.item.id)
+    runner.expectEqual(fetchedInline, dummyInline, "按需 inlineData 读取正确无误")
+
+    // 富文本粘贴时若 inlineData 为 nil 自动按需装配
+    let rtf = Data("{\\rtf1 test}".utf8)
+    _ = try store.capture(kind: .richText, plainText: "test rich text", sourceBundle: "app", sourceName: "App", inlineData: rtf)
+    let textResults = store.search(query: "test rich text", filter: .text, limit: 1)
+    runner.expectEqual(textResults.count, 1, "命中搜索富文本")
+    let lightweightItem = textResults.first!
+    runner.expectTrue(lightweightItem.inlineData == nil, "搜索得到的富文本条目 inlineData 为 nil")
+    guard case .richText(let pastedData, _)? = store.pasteboardContent(for: lightweightItem) else {
+        runner.expectTrue(false, "富文本应按需装配出 RTF")
+        return
+    }
+    runner.expectEqual(pastedData, rtf, "按需装配的富文本数据一致")
+}
+
+runner.run("ImageHelper 缩略图自适应压缩（Alpha PNG 与无 Alpha JPEG）") {
+    guard let repNoAlpha = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32, bitsPerSample: 8,
+        samplesPerPixel: 3, hasAlpha: false, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 96, bitsPerPixel: 24
+    ), let repData = repNoAlpha.representation(using: .png, properties: [:]) else {
+        runner.expectTrue(false, "创建测试无 Alpha 位图失败")
+        return
+    }
+    let thumbData = ImageHelper.thumbnailData(from: repData, maxPixel: 16)
+    runner.expectTrue(thumbData != nil, "自适应缩略图生成成功")
+    // JPEG 头部以 0xFF, 0xD8 开头
+    let isJPEG = thumbData?.prefix(2) == Data([0xFF, 0xD8])
+    runner.expectTrue(isJPEG, "无 Alpha 通道图片自适应采用 JPEG 压缩")
+}
+
 print("----")
 if runner.failures.isEmpty {
     print("全部 \(runner.passed) 个用例通过 ✅")

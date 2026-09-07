@@ -18,11 +18,13 @@ public struct ClipItem: Identifiable, Equatable {
     public var meta: [String: String]
     public var inlineData: Data?
     public var blobName: String?
+    public let displayText: String
 
     public init(id: Int64, kind: ClipKind, plainText: String, sourceBundle: String, sourceName: String,
                 byteSize: Int, createdAt: Date, lastUsedAt: Date, useCount: Int, pinned: Bool,
                 tags: [String], title: String? = nil, meta: [String: String],
-                inlineData: Data? = nil, blobName: String? = nil) {
+                inlineData: Data? = nil, blobName: String? = nil,
+                displayText: String? = nil) {
         self.id = id
         self.kind = kind
         self.plainText = plainText
@@ -38,10 +40,11 @@ public struct ClipItem: Identifiable, Equatable {
         self.meta = meta
         self.inlineData = inlineData
         self.blobName = blobName
+        self.displayText = displayText ?? Self.computeDisplayText(kind: kind, plainText: plainText, meta: meta)
     }
 
-    /// 列表行的单行展示文本。
-    public var displayText: String {
+    /// 预计算列表行的单行展示文本。
+    public static func computeDisplayText(kind: ClipKind, plainText: String, meta: [String: String]) -> String {
         switch kind {
         case .image:
             return meta["display"] ?? "图片"

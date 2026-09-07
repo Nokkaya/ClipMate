@@ -4,6 +4,8 @@ import AppKit
 /// 详情预览浮层（⌘I）：大图/全文/文件清单 + 元信息 + 常用操作。
 struct PreviewOverlay: View {
     @ObservedObject var viewModel: PanelViewModel
+    @State private var previewImage: NSImage?
+    @State private var isLoadingMedia = false
 
     var body: some View {
         if let item = viewModel.previewItem {
@@ -20,6 +22,22 @@ struct PreviewOverlay: View {
                 .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .windowBackgroundColor)))
                 .shadow(color: .black.opacity(0.3), radius: 14)
                 .padding(24)
+                .task(id: item.id) {
+                    previewImage = nil
+                    guard item.kind == .image || item.kind == .pdf else { return }
+                    guard let url = viewModel.store.imageURL(for: item) else { return }
+                    isLoadingMedia = true
+                    defer { isLoadingMedia = false }
+                    let fileData = await Task.detached(priority: .userInitiated) { () -> Data? in
+                        try? Data(contentsOf: url)
+                    }.value
+                    guard !Task.isCancelled, let fileData else { return }
+                    if item.kind == .image {
+                        self.previewImage = NSImage(data: fileData)
+                    } else if item.kind == .pdf {
+                        self.previewImage = PDFHelper.firstPageImage(from: fileData)
+                    }
+                }
             }
         }
     }
@@ -52,38 +70,12 @@ struct PreviewOverlay: View {
     private func content(_ item: ClipItem) -> some View {
         switch item.kind {
         case .image:
-            if let url = viewModel.store.imageURL(for: item), let image = NSImage(contentsOf: url) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: 300)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
-            } else {
-                Text("图片数据不可用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 80)
-            }
+            imageSection(item)
             if !item.plainText.isEmpty {
                 textSection(item, title: "识别到的文字（可搜索）")
             }
         case .pdf:
-            if let url = viewModel.store.imageURL(for: item),
-               let data = try? Data(contentsOf: url),
-               let image = PDFHelper.firstPageImage(from: data) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: 300)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
-            } else {
-                Text("PDF 数据不可用")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 80)
-            }
+            pdfSection(item)
             if !item.plainText.isEmpty {
                 textSection(item, title: "提取的文字（可检索）")
             }
@@ -109,6 +101,53 @@ struct PreviewOverlay: View {
             .scrollIndicators(.hidden)
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+        }
+    }
+
+    @ViewBuilder
+    private func imageSection(_ item: ClipItem) -> some View {
+        if let previewImage {
+            Image(nsImage: previewImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
+        } else if let thumb = viewModel.thumbnail(for: item) {
+            Image(nsImage: thumb)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
+        } else if isLoadingMedia {
+            ProgressView()
+                .frame(maxWidth: .infinity, minHeight: 120)
+        } else {
+            Text("图片数据不可用")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 80)
+        }
+    }
+
+    @ViewBuilder
+    private func pdfSection(_ item: ClipItem) -> some View {
+        if let previewImage {
+            Image(nsImage: previewImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
+        } else if isLoadingMedia {
+            ProgressView()
+                .frame(maxWidth: .infinity, minHeight: 120)
+        } else {
+            Text("PDF 数据不可用")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 80)
         }
     }
 

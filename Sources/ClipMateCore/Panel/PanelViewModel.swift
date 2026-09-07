@@ -359,9 +359,10 @@ public final class PanelViewModel: ObservableObject {
     // MARK: - 缩略图
 
     public func thumbnail(for item: ClipItem) -> NSImage? {
-        guard item.kind == .image, let data = item.inlineData else { return nil }
+        guard item.kind == .image else { return nil }
         let key = NSNumber(value: item.id)
         if let cached = thumbCache.object(forKey: key) { return cached }
+        guard let data = item.inlineData ?? store.inlineData(for: item.id) else { return nil }
         guard let image = NSImage(data: data) else { return nil }
         thumbCache.setObject(image, forKey: key)
         return image

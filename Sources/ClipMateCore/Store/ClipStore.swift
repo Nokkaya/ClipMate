@@ -38,7 +38,10 @@ public final class ClipStore {
     /// 当前已建立向量的条目数。
     public var embeddedCount: Int { embeddingVectors().count }
 
-    // MARK: - 列
+    // MARK: - 列与投影
+
+    private static let listColumns = "id, kind, plain_text, source_bundle, source_name, byte_size, created_at, last_used_at, use_count, pinned, title, tags, meta, blob_name"
+    private static let ftsListColumns = "clip.id, clip.kind, clip.plain_text, clip.source_bundle, clip.source_name, clip.byte_size, clip.created_at, clip.last_used_at, clip.use_count, clip.pinned, clip.title, clip.tags, clip.meta, clip.blob_name"
 
     private enum Col {
         static let id: Int32 = 0
@@ -46,16 +49,16 @@ public final class ClipStore {
         static let plainText: Int32 = 2
         static let sourceBundle: Int32 = 3
         static let sourceName: Int32 = 4
-        static let byteSize: Int32 = 6
-        static let createdAt: Int32 = 7
-        static let lastUsedAt: Int32 = 8
-        static let useCount: Int32 = 9
-        static let pinned: Int32 = 10
-        static let title: Int32 = 11
-        static let tags: Int32 = 12
-        static let meta: Int32 = 13
+        static let byteSize: Int32 = 5
+        static let createdAt: Int32 = 6
+        static let lastUsedAt: Int32 = 7
+        static let useCount: Int32 = 8
+        static let pinned: Int32 = 9
+        static let title: Int32 = 10
+        static let tags: Int32 = 11
+        static let meta: Int32 = 12
+        static let blobName: Int32 = 13
         static let inlineData: Int32 = 14
-        static let blobName: Int32 = 15
     }
 
     // MARK: - 采集入库（含去重合并）
@@ -177,7 +180,7 @@ public final class ClipStore {
     private func textSearch(_ trimmed: String, filter: FilterKind, limit: Int) throws -> [ClipItem] {
         if !trimmed.isEmpty, db.hasFTS5, !containsCJK(trimmed) {
             let ftsQuery = ftsExpression(for: trimmed)
-            var sql = "SELECT clip.* FROM clip, clip_fts WHERE clip_fts MATCH ? AND clip.id = clip_fts.rowid"
+            var sql = "SELECT \(Self.ftsListColumns) FROM clip, clip_fts WHERE clip_fts MATCH ? AND clip.id = clip_fts.rowid"
             if let clause = filter.kindClause { sql += " AND \(clause)" }
             if let extra = filter.extraClause { sql += " AND \(extra)" }
             if filter == .pinned { sql += " AND clip.pinned = 1" }
@@ -196,7 +199,7 @@ public final class ClipStore {
         if let clause = filter.kindClause { clauses.append(clause) }
         if let extra = filter.extraClause { clauses.append(extra) }
         if filter == .pinned { clauses.append("pinned = 1") }
-        var sql = "SELECT * FROM clip"
+        var sql = "SELECT \(Self.listColumns) FROM clip"
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
         sql += " ORDER BY pinned DESC, created_at DESC LIMIT ?"
         args.append(.int(Int64(limit)))
@@ -218,9 +221,9 @@ public final class ClipStore {
     }
 
     public func item(id: Int64) -> ClipItem? {
-        guard let statement = try? db.prepare("SELECT * FROM clip WHERE id = ?") else { return nil }
+        guard let statement = try? db.prepare("SELECT \(Self.listColumns), inline_data FROM clip WHERE id = ?") else { return nil }
         statement.bind([.int(id)])
-        return statement.step() ? rowToItem(statement) : nil
+        return statement.step() ? rowToItem(statement, includeInlineData: true) : nil
     }
 
     public func itemCount() -> Int {
@@ -250,7 +253,7 @@ public final class ClipStore {
     public func items(ids: [Int64]) -> [ClipItem] {
         guard !ids.isEmpty else { return [] }
         let placeholders = ids.map { _ in "?" }.joined(separator: ",")
-        guard let statement = try? db.prepare("SELECT * FROM clip WHERE id IN (\(placeholders))") else { return [] }
+        guard let statement = try? db.prepare("SELECT \(Self.listColumns) FROM clip WHERE id IN (\(placeholders))") else { return [] }
         statement.bind(ids.map { .int($0) })
         return collect(statement)
     }
@@ -393,7 +396,7 @@ public final class ClipStore {
     }
 
     public func exportJSON() throws -> Data {
-        let statement = try db.prepare("SELECT * FROM clip ORDER BY created_at ASC")
+        let statement = try db.prepare("SELECT \(Self.listColumns) FROM clip ORDER BY created_at ASC")
         let items = collect(statement).map { item in
             ExportItem(kind: item.kind.rawValue, plainText: item.plainText,
                        sourceBundle: item.sourceBundle, sourceName: item.sourceName,
@@ -428,14 +431,22 @@ public final class ClipStore {
         return imported
     }
 
-    // MARK: - 粘贴内容装配
+    // MARK: - 粘贴内容装配与按需二进制
+
+    /// 按需读取单条记录的缩略图/内联二进制（避免列表检索全量读取大量 BLOB）
+    public func inlineData(for id: Int64) -> Data? {
+        guard let statement = try? db.prepare("SELECT inline_data FROM clip WHERE id = ?") else { return nil }
+        statement.bind([.int(id)])
+        guard statement.step() else { return nil }
+        return statement.columnData(0)
+    }
 
     public func pasteboardContent(for item: ClipItem) -> PasteboardContent? {
         switch item.kind {
         case .text, .url:
             return .text(item.plainText)
         case .richText:
-            if let rtf = item.inlineData { return .richText(rtf: rtf, plain: item.plainText) }
+            if let rtf = item.inlineData ?? inlineData(for: item.id) { return .richText(rtf: rtf, plain: item.plainText) }
             return .text(item.plainText)
         case .image:
             guard let name = item.blobName,
@@ -461,17 +472,17 @@ public final class ClipStore {
 
     // MARK: - Private
 
-    private func collect(_ statement: Statement) -> [ClipItem] {
+    private func collect(_ statement: Statement, includeInlineData: Bool = false) -> [ClipItem] {
         var items: [ClipItem] = []
         while statement.step() {
-            items.append(rowToItem(statement))
+            items.append(rowToItem(statement, includeInlineData: includeInlineData))
         }
         return items
     }
 
-    private func rowToItem(_ statement: Statement) -> ClipItem {
-        let tags = decode([String].self, from: statement.columnText(Col.tags)) ?? []
-        let meta = decode([String: String].self, from: statement.columnText(Col.meta)) ?? [:]
+    private func rowToItem(_ statement: Statement, includeInlineData: Bool = false) -> ClipItem {
+        let tags = decodeTags(from: statement.columnText(Col.tags))
+        let meta = decodeMeta(from: statement.columnText(Col.meta))
         return ClipItem(
             id: statement.columnInt(Col.id),
             kind: ClipKind(rawValue: statement.columnText(Col.kind) ?? "text") ?? .text,
@@ -486,14 +497,28 @@ public final class ClipStore {
             tags: tags,
             title: statement.columnText(Col.title),
             meta: meta,
-            inlineData: statement.columnData(Col.inlineData),
+            inlineData: includeInlineData ? statement.columnData(Col.inlineData) : nil,
             blobName: statement.columnText(Col.blobName)
         )
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, from string: String?) -> T? {
-        guard let string, let data = string.data(using: .utf8) else { return nil }
-        return try? decoder.decode(type, from: data)
+    /// 极速 JSON 快路径：针对高频空集合直出空实例，非空改用 JSONSerialization 规避 Codable 反射开销
+    private func decodeTags(from string: String?) -> [String] {
+        guard let string, !string.isEmpty, string != "[]" else { return [] }
+        if let data = string.data(using: .utf8),
+           let array = try? JSONSerialization.jsonObject(with: data) as? [String] {
+            return array
+        }
+        return []
+    }
+
+    private func decodeMeta(from string: String?) -> [String: String] {
+        guard let string, !string.isEmpty, string != "{}" else { return [:] }
+        if let data = string.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            return dict
+        }
+        return [:]
     }
 
     private func json(_ value: some Encodable) -> String {
