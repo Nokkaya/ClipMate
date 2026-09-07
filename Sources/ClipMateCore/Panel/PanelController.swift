@@ -147,12 +147,18 @@ final class PanelController {
         }
 
         switch event.keyCode {
-        case 125, 126: // 上下方向键
-            viewModel.moveSelection(event.keyCode == 125 ? 1 : -1)
+        case 125, 126: // 上下方向键；Shift 组合为批量多选扩展
+            if flags.contains(.shift) {
+                viewModel.extendSelection(event.keyCode == 125 ? 1 : -1)
+            } else {
+                viewModel.moveSelection(event.keyCode == 125 ? 1 : -1)
+            }
             return true
         case 36: // Return
             if flags.contains(.command) && flags.contains(.shift) {
                 viewModel.pasteQueue()          // ⌘⇧⏎ 顺序粘贴队列
+            } else if flags.contains(.command) && flags.contains(.option) {
+                viewModel.pasteAsPlainText()    // ⌘⌥⏎ 粘贴为纯文本
             } else if cmdOnly {
                 viewModel.copySelected()        // ⌘⏎ 仅复制
             } else if flags.contains(.option) {
@@ -166,12 +172,18 @@ final class PanelController {
         case 51: // Delete
             if !flags.contains(.command) && !flags.contains(.option) && !flags.contains(.control)
                 && viewModel.query.isEmpty {
-                viewModel.delete()
+                if viewModel.multiSelectedIDs.count > 1 {
+                    viewModel.deleteMulti()     // 批量删除
+                } else {
+                    viewModel.delete()
+                }
                 return true
             }
             return false
-        case 53: // Esc：预览 → 清搜索词 → 隐藏
-            if viewModel.previewItem != nil {
+        case 53: // Esc：清多选 → 预览 → 清搜索词 → 隐藏
+            if viewModel.multiSelectedIDs.count > 0 {
+                viewModel.clearMultiSelection()
+            } else if viewModel.previewItem != nil {
                 viewModel.previewItem = nil
             } else if !viewModel.query.isEmpty {
                 viewModel.query = ""

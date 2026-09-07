@@ -30,6 +30,7 @@ struct ClipRowView: View {
     let item: ClipItem
     let selected: Bool
     var hovered: Bool = false
+    var multiSelected: Bool = false
     let thumbnail: NSImage?
 
     var body: some View {
@@ -60,6 +61,11 @@ struct ClipRowView: View {
                 }
             }
             Spacer(minLength: 4)
+            if multiSelected && !selected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.accentColor)
+            }
             if item.pinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 10))
@@ -89,6 +95,7 @@ struct ClipRowView: View {
 
     private var rowBackground: Color {
         if selected { return Color.accentColor.opacity(0.16) }
+        if multiSelected { return Color.accentColor.opacity(0.08) }
         if hovered { return Color.primary.opacity(0.05) }
         return .clear
     }

@@ -15,6 +15,8 @@ public final class PanelViewModel: ObservableObject {
     @Published public var queue: [ClipItem] = []
     /// 详情预览浮层当前条目。
     @Published public var previewItem: ClipItem?
+    /// 批量多选（⇧↑↓ 扩展，存条目 id 以免列表刷新错位）。
+    @Published public var multiSelectedIDs: Set<Int64> = []
 
     /// AI 工作台独立窗口（⌘K），由 AppModel 装配注入。
     weak var aiWorkspace: AIWorkspaceController?
@@ -87,6 +89,20 @@ public final class PanelViewModel: ObservableObject {
     public func pasteSelected() {
         guard let item = selectedItem else { return }
         paste(item: item)
+    }
+
+    /// 忽略富文本格式，按纯文本粘贴/复制。
+    public func pasteAsPlainText(item: ClipItem? = nil) {
+        let target = item ?? selectedItem
+        guard let target else { return }
+        pasteContent(.text(target.plainText))
+    }
+
+    public func copyAsPlainText(item: ClipItem? = nil) {
+        let target = item ?? selectedItem
+        guard let target else { return }
+        PasteBack.write(.text(target.plainText))
+        monitor.suppress(seconds: 1.5)
     }
 
     public func paste(item: ClipItem) {
@@ -206,6 +222,32 @@ public final class PanelViewModel: ObservableObject {
         } else if let target {
             previewItem = target
         }
+    }
+
+    // MARK: - 批量多选
+
+    /// ⇧↑/⇧↓ 扩展多选（从当前选中行起）。
+    public func extendSelection(_ delta: Int) {
+        guard !items.isEmpty else { return }
+        if multiSelectedIDs.isEmpty, items.indices.contains(selectedIndex) {
+            multiSelectedIDs.insert(items[selectedIndex].id)
+        }
+        let next = min(max(0, selectedIndex + delta), items.count - 1)
+        selectedIndex = next
+        multiSelectedIDs.insert(items[next].id)
+    }
+
+    public func clearMultiSelection() {
+        multiSelectedIDs.removeAll()
+    }
+
+    public func deleteMulti() {
+        guard !multiSelectedIDs.isEmpty else { return }
+        for id in multiSelectedIDs {
+            try? store.delete(id)
+        }
+        multiSelectedIDs.removeAll()
+        reload()
     }
 
     // MARK: - 片段收藏（标签驱动）

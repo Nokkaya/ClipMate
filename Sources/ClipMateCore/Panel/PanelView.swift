@@ -158,6 +158,7 @@ struct ClipList: View {
                             item: item,
                             selected: index == viewModel.selectedIndex,
                             hovered: viewModel.hoverIndex == index,
+                            multiSelected: viewModel.multiSelectedIDs.contains(item.id),
                             thumbnail: viewModel.thumbnail(for: item)
                         )
                         .id(index)
@@ -191,7 +192,9 @@ struct ContextMenuItems: View {
 
     var body: some View {
         Button("粘贴") { viewModel.paste(item: item) }
+        Button("粘贴为纯文本") { viewModel.pasteAsPlainText(item: item) }
         Button("复制") { viewModel.copy(item: item) }
+        Button("复制为纯文本") { viewModel.copyAsPlainText(item: item) }
         Button(item.pinned ? "取消固定" : "固定 ★") { viewModel.togglePin(item) }
         Button(item.tags.contains(FilterKind.snippetTag) ? "移出片段" : "存为片段") {
             viewModel.toggleSnippet(item: item)
@@ -205,6 +208,11 @@ struct ContextMenuItems: View {
         }
         Button("AI 操作…") { viewModel.openAI(item: item) }
         Divider()
+        if viewModel.multiSelectedIDs.count > 1 {
+            Button("删除选中的 \(viewModel.multiSelectedIDs.count) 条", role: .destructive) {
+                viewModel.deleteMulti()
+            }
+        }
         Button("删除", role: .destructive) { viewModel.delete(item: item) }
     }
 }
@@ -240,7 +248,9 @@ struct FooterBar: View {
             KeyHint("⌘I", "预览")
             KeyHint("⇧⏎", "入队")
             KeyHint("⌘⇧⏎", "连贴")
+            KeyHint("⌘⌥⏎", "纯文本")
             KeyHint("⌘K", "AI")
+            KeyHint("⇧↑↓", "多选")
             KeyHint("⌫", "删除")
             Spacer()
             KeyHint("Esc", "隐藏")

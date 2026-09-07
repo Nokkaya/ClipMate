@@ -15,6 +15,7 @@ final class AppModel {
     let settingsWindow: SettingsWindowController
     let embeddingBackfill: EmbeddingBackfill?
     private(set) var aiWorkspace: AIWorkspaceController!
+    private let onboarding: OnboardingController
 
     private var hotkeyObserver: NSObjectProtocol?
     private var retentionTimer: Timer?
@@ -39,6 +40,7 @@ final class AppModel {
         panel = PanelController(store: store, settings: settings, monitor: monitor, frontApps: frontApps, ai: ai)
         settingsWindow = SettingsWindowController(settings: settings, store: store, ai: ai, frontApps: frontApps)
         menuBar = MenuBarController(settings: settings, store: store)
+        onboarding = OnboardingController(settings: settings)
         aiWorkspace = AIWorkspaceController(ai: ai, store: store, monitor: monitor, settings: settings)
         aiWorkspace.model.pasteTargetProvider = { [weak self] in self?.panel.viewModel.pasteTarget }
         aiWorkspace.model.hidePanel = { [weak self] in self?.panel.hidePanel() }
@@ -102,6 +104,8 @@ final class AppModel {
         }
         // 存量数据向量补算（后台，低优先级）
         embeddingBackfill?.backfillAll()
+        // 首次启动引导（含辅助功能授权引导）
+        onboarding.showIfNeeded()
     }
 
     private func applyHotkey() {

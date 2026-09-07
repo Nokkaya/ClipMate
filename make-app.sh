@@ -22,14 +22,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>         <string>com.clipmate.app</string>
     <key>CFBundleExecutable</key>         <string>ClipMate</string>
     <key>CFBundlePackageType</key>        <string>APPL</string>
-    <key>CFBundleShortVersionString</key> <string>0.1.0</string>
-    <key>CFBundleVersion</key>            <string>1</string>
+    <key>CFBundleIconFile</key>           <string>AppIcon</string>
+    <key>CFBundleShortVersionString</key> <string>0.2.0</string>
+    <key>CFBundleVersion</key>            <string>2</string>
     <key>LSMinimumSystemVersion</key>     <string>13.0</string>
     <key>LSUIElement</key>                <true/>
     <key>NSHighResolutionCapable</key>    <true/>
 </dict>
 </plist>
 PLIST
+
+# 应用图标（Resources/AppIcon.icns 由 scripts/make-icon.swift 生成，已入库）
+mkdir -p "$APP/Contents/Resources"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cp "$BIN_PATH/ClipMate" "$APP/Contents/MacOS/ClipMate"
 codesign --force --sign - "$APP"
