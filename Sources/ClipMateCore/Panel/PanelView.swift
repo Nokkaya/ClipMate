@@ -11,7 +11,6 @@ struct PanelView: View {
             if viewModel.showEditOverlay { EditOverlay(viewModel: viewModel) }
             if viewModel.showConfirmClear { ConfirmClearOverlay(viewModel: viewModel) }
             if viewModel.previewItem != nil { PreviewOverlay(viewModel: viewModel) }
-            if viewModel.aiState != nil { AIOverlayView(viewModel: viewModel) }
         }
         .frame(width: 660, height: 480)
     }

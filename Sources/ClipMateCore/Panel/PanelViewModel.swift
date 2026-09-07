@@ -1,22 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// AI 浮层状态机。
-public struct AIOverlayState: Equatable {
-    public var item: ClipItem
-    public var action: AIAction?
-    public var output: String = ""
-    public var isRunning = false
-    public var finished = false
-    public var errorText: String?
-
-    public static func == (lhs: AIOverlayState, rhs: AIOverlayState) -> Bool {
-        lhs.item.id == rhs.item.id && lhs.output == rhs.output
-            && lhs.isRunning == rhs.isRunning && lhs.finished == rhs.finished
-            && lhs.errorText == rhs.errorText && lhs.action == rhs.action
-    }
-}
-
 /// 主面板状态与动作。所有公开方法约定在主线程调用（SwiftUI/键盘监听/采集回调均在主线程）。
 public final class PanelViewModel: ObservableObject {
     @Published public var query = ""
@@ -27,12 +11,13 @@ public final class PanelViewModel: ObservableObject {
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
-    @Published public var aiState: AIOverlayState?
-    @Published public var aiCustomPrompt = ""
     /// 粘贴队列（会话内有效，按序批量粘贴）。
     @Published public var queue: [ClipItem] = []
     /// 详情预览浮层当前条目。
     @Published public var previewItem: ClipItem?
+
+    /// AI 工作台独立窗口（⌘K），由 AppModel 装配注入。
+    weak var aiWorkspace: AIWorkspaceController?
 
     public let store: ClipStore
     public let settings: AppSettings
@@ -46,7 +31,6 @@ public final class PanelViewModel: ObservableObject {
     var openSettings: (() -> Void)?
 
     private var searchTask: Task<Void, Never>?
-    private var aiTask: Task<Void, Never>?
     private let thumbCache = NSCache<NSNumber, NSImage>()
 
     public init(store: ClipStore, settings: AppSettings, monitor: ClipboardMonitor,
@@ -236,112 +220,19 @@ public final class PanelViewModel: ObservableObject {
         return !isSnippet
     }
 
-    // MARK: - 自定义脚本
-
-    public func runScript(_ script: ScriptAction) {
-        guard var state = aiState else { return }
-        let content = state.item.plainText
-        state.output = ""
-        state.isRunning = true
-        state.finished = false
-        state.errorText = nil
-        aiState = state
-        aiTask?.cancel()
-        aiTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let output = try await ScriptRunner.run(script, input: content)
-                if self.aiState?.isRunning == true {
-                    self.aiState?.output = output
-                    self.aiState?.isRunning = false
-                    self.aiState?.finished = true
-                }
-            } catch {
-                self.aiState?.isRunning = false
-                self.aiState?.errorText = "脚本失败：\(error.localizedDescription)"
-            }
-        }
-    }
-
     public func clearTransientState() {
         showEditOverlay = false
         showConfirmClear = false
         previewItem = nil
-        if aiState?.isRunning == true { aiTask?.cancel() }
-        aiState = nil
     }
 
-    // MARK: - AI
+    // MARK: - AI 工作台（独立悬浮窗口，不覆盖主面板）
 
     public func openAI(item: ClipItem? = nil) {
         let target = item ?? selectedItem
         guard let target else { return }
         if let index = items.firstIndex(where: { $0.id == target.id }) { selectedIndex = index }
-        aiState = AIOverlayState(item: target)
-    }
-
-    public func closeAI() {
-        aiTask?.cancel()
-        aiTask = nil
-        aiState = nil
-    }
-
-    public func runAI(_ action: AIAction) {
-        guard var state = aiState else { return }
-        guard ai.isConfigured else {
-            state.errorText = AIError.notConfigured.localizedDescription
-            aiState = state
-            return
-        }
-        state.action = action
-        state.output = ""
-        state.isRunning = true
-        state.finished = false
-        state.errorText = nil
-        aiState = state
-
-        let prompt = action.prompt(for: state.item.plainText, custom: aiCustomPrompt)
-        aiTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                for try await delta in self.ai.stream(prompt: prompt) {
-                    self.aiState?.output += delta
-                }
-                if self.aiState?.isRunning == true {
-                    self.aiState?.isRunning = false
-                    self.aiState?.finished = true
-                }
-            } catch {
-                self.aiState?.isRunning = false
-                self.aiState?.errorText = "请求失败：\(error.localizedDescription)"
-            }
-        }
-    }
-
-    public func copyAIResult() {
-        guard let output = aiState?.output, !output.isEmpty else { return }
-        PasteBack.write(.text(output))
-        monitor.suppress(seconds: 1.5)
-    }
-
-    public func replaceWithAIResult() {
-        guard let state = aiState, !state.output.isEmpty else { return }
-        _ = try? store.capture(
-            kind: .text,
-            plainText: state.output,
-            sourceBundle: Bundle.main.bundleIdentifier ?? "",
-            sourceName: "ClipMate",
-            tags: ["AI"]
-        )
-        closeAI()
-        reload()
-    }
-
-    public func pasteAIResult() {
-        guard let state = aiState, !state.output.isEmpty else { return }
-        let output = state.output
-        closeAI()
-        pasteContent(.text(output))
+        aiWorkspace?.openOrFocus(item: target)
     }
 
     // MARK: - 缩略图

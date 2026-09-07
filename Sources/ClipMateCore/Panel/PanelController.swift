@@ -13,6 +13,8 @@ final class PanelController {
     let viewModel: PanelViewModel
     let frontApps: FrontAppTracker
     var onOpenSettings: (() -> Void)?
+    /// AI 工作台独立窗口（⌘K），由 AppModel 装配注入。
+    weak var aiWorkspace: AIWorkspaceController?
 
     private var keyMonitor: Any?
     private var resignKeyObserver: NSObjectProtocol?
@@ -47,6 +49,8 @@ final class PanelController {
             object: panel,
             queue: .main
         ) { [weak self] _ in
+            // AI 工作台窗口获得 key 时不隐藏主面板（两者并排使用）
+            if NSApp.keyWindow === self?.aiWorkspace?.panel { return }
             self?.hidePanel()
         }
     }
@@ -81,6 +85,14 @@ final class PanelController {
         if NSApp.isActive {
             NSApp.hide(nil) // 焦点还给上一个应用
         }
+    }
+
+    /// AI 工作台关闭后把 key 还给主面板（若仍可见）。
+    func reassertKey() {
+        guard panel.isVisible else { return }
+        installKeyMonitor()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func positionPanel() {
@@ -131,11 +143,6 @@ final class PanelController {
                 viewModel.previewItem = nil
                 return true
             }
-            return false
-        }
-        // AI 浮层：Esc 关闭，其余放行（自定义指令输入框）
-        if viewModel.aiState != nil {
-            if event.keyCode == 53 { viewModel.closeAI(); return true }
             return false
         }
 

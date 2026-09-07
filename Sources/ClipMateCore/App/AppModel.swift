@@ -14,6 +14,7 @@ final class AppModel {
     let menuBar: MenuBarController
     let settingsWindow: SettingsWindowController
     let embeddingBackfill: EmbeddingBackfill?
+    private(set) var aiWorkspace: AIWorkspaceController!
 
     private var hotkeyObserver: NSObjectProtocol?
     private var retentionTimer: Timer?
@@ -38,6 +39,13 @@ final class AppModel {
         panel = PanelController(store: store, settings: settings, monitor: monitor, frontApps: frontApps, ai: ai)
         settingsWindow = SettingsWindowController(settings: settings, store: store, ai: ai, frontApps: frontApps)
         menuBar = MenuBarController(settings: settings, store: store)
+        aiWorkspace = AIWorkspaceController(ai: ai, store: store, monitor: monitor, settings: settings)
+        aiWorkspace.model.pasteTargetProvider = { [weak self] in self?.panel.viewModel.pasteTarget }
+        aiWorkspace.model.hidePanel = { [weak self] in self?.panel.hidePanel() }
+        aiWorkspace.mainFrameProvider = { [weak self] in self?.panel.panel.frame }
+        aiWorkspace.onClosed = { [weak self] in self?.panel.reassertKey() }
+        panel.aiWorkspace = aiWorkspace
+        panel.viewModel.aiWorkspace = aiWorkspace
     }
 
     func start() {

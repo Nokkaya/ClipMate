@@ -12,7 +12,7 @@ public final class HotkeyManager {
     public func register(keyCode: UInt32, modifiers: UInt32) {
         unregister()
         installHandlerIfNeeded()
-        var hotKeyID = EventHotKeyID(signature: HotkeyManager.signature, id: 1)
+        let hotKeyID = EventHotKeyID(signature: HotkeyManager.signature, id: 1)
         let status = RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
         if status != noErr {
             NSLog("ClipMate hotkey register failed: \(status)")
