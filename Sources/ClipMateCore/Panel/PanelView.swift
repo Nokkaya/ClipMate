@@ -6,32 +6,34 @@ struct PanelView: View {
     @ObservedObject var viewModel: PanelViewModel
 
     var body: some View {
+        panelCard
+            .frame(width: 720, height: 540) // 窗口比内容大一圈：给 SwiftUI 阴影留出绘制空间
+    }
+
+    private var panelCard: some View {
         ZStack {
-            mainContent
+            VStack(spacing: 0) {
+                SearchBar(viewModel: viewModel)
+                FilterChips(viewModel: viewModel)
+                Divider().overlay(Color.primary.opacity(0.08))
+                if viewModel.items.isEmpty {
+                    EmptyStateView(query: viewModel.query)
+                } else {
+                    ClipList(viewModel: viewModel)
+                }
+                Divider().overlay(Color.primary.opacity(0.08))
+                if viewModel.multiSelectedIDs.count > 1 {
+                    BatchActionBar(viewModel: viewModel)
+                } else {
+                    FooterBar()
+                }
+            }
+            .disabled(viewModel.showEditOverlay || viewModel.showSnippetOverlay || viewModel.showConfirmClear || viewModel.previewItem != nil)
+
             if viewModel.showEditOverlay { EditOverlay(viewModel: viewModel) }
             if viewModel.showSnippetOverlay { SnippetEditOverlay(viewModel: viewModel) }
             if viewModel.showConfirmClear { ConfirmClearOverlay(viewModel: viewModel) }
             if viewModel.previewItem != nil { PreviewOverlay(viewModel: viewModel) }
-        }
-        .frame(width: 720, height: 540) // 窗口比内容大一圈：给 SwiftUI 阴影留出绘制空间
-    }
-
-    private var mainContent: some View {
-        VStack(spacing: 0) {
-            SearchBar(viewModel: viewModel)
-            FilterChips(viewModel: viewModel)
-            Divider().overlay(Color.primary.opacity(0.08))
-            if viewModel.items.isEmpty {
-                EmptyStateView(query: viewModel.query)
-            } else {
-                ClipList(viewModel: viewModel)
-            }
-            Divider().overlay(Color.primary.opacity(0.08))
-            if viewModel.multiSelectedIDs.count > 1 {
-                BatchActionBar(viewModel: viewModel)
-            } else {
-                FooterBar()
-            }
         }
         .frame(width: 660, height: 480)
         .background(VisualEffectBackground())

@@ -1,21 +1,20 @@
 import SwiftUI
 
-/// 通用浮层容器：采用与主面板统一的毛玻璃质感、半透明卡片、内描边与深邃投影。
+/// 通用浮层容器：采用与主面板统一的毛玻璃质感、半透明卡片、内描边与柔和投影。
 private func overlayContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
     ZStack {
-        Color.black.opacity(0.38)
-            .ignoresSafeArea()
+        Color.black.opacity(0.32)
 
         content()
-            .padding(18)
+            .padding(16)
             .background(VisualEffectBackground())
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.38), radius: 24, y: 10)
-            .padding(20)
+            .shadow(color: .black.opacity(0.28), radius: 18, y: 6)
+            .padding(14)
     }
 }
 
