@@ -58,6 +58,13 @@ final class TestRunner {
         }
     }
 
+    func expectFalse(_ condition: Bool, _ message: String) {
+        if condition {
+            failures.append("\(current) — \(message)")
+            print("   ✗ \(message)")
+        }
+    }
+
     func expectEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String) {
         if actual != expected {
             failures.append("\(current) — \(message)：实际 \(actual)，期望 \(expected)")
@@ -441,6 +448,85 @@ runner.run("大文本与首行 displayText 性能与正确性") {
         byteSize: 100, createdAt: Date(), lastUsedAt: Date(), useCount: 1, pinned: false, tags: [], meta: [:]
     )
     runner.expectEqual(fileItem.displayText, "/path/to/file1.txt", "文件条目提取首行路径")
+}
+
+runner.run("异步 OCR 补全与 FTS 索引检索") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let dummyImg = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    let captured = try store.capture(
+        kind: .image,
+        plainText: "",
+        sourceBundle: "com.apple.screencapture",
+        sourceName: "截图",
+        tags: ["图片"],
+        inlineData: dummyImg,
+        meta: ["display": "图片 100x100"]
+    )
+    runner.expectEqual(captured.item.plainText, "", "初始图片文本为空")
+    runner.expectFalse(captured.item.tags.contains("OCR"), "初始无 OCR 标签")
+
+    // 模拟 OCR 识别完成调用 updateOCR
+    let ocrResultText = "Invoice No. 987654 Total Amount $500"
+    let updated = try store.updateOCR(captured.item.id, text: ocrResultText)
+    runner.expectTrue(updated != nil, "更新 OCR 成功")
+    runner.expectEqual(updated?.plainText, ocrResultText, "plainText 已更新为识别文字")
+    runner.expectTrue(updated?.tags.contains("OCR") ?? false, "包含 OCR 标签")
+    runner.expectEqual(updated?.meta["ocr"], "1", "元数据标记 ocr 为 1")
+
+    // 校验 FTS 搜索
+    let searchResults = store.search(query: "987654", filter: .all, limit: 10)
+    runner.expectEqual(searchResults.count, 1, "通过 OCR 文字全文检索命中")
+    runner.expectEqual(searchResults.first?.id, captured.item.id, "命中正确条目")
+}
+
+runner.run("ScriptRunner 管道防死锁（输出超过 64KB）") {
+    // 产生 ~150KB 输出，远超 64KB 管道缓冲区
+    let script = ScriptAction(
+        name: "overflow",
+        command: "awk 'BEGIN { for (i = 0; i < 3000; i++) print \"Line \" i \": 1234567890123456789012345678901234567890\" }'"
+    )
+    var result: Result<String, Error>?
+    let semaphore = DispatchSemaphore(value: 0)
+    let start = Date()
+    Task {
+        do {
+            result = .success(try await ScriptRunner.run(script, input: ""))
+        } catch {
+            result = .failure(error)
+        }
+        semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .now() + 5)
+    let duration = -start.timeIntervalSinceNow * 1000
+    switch result {
+    case .success(let output):
+        runner.expectEqual(output.count, 20000, "超长脚本输出截断至 20000 字符上限")
+        runner.expectTrue(duration < 2000, "150KB 脚本并发实时排空管道耗时低于 2s（实际 \(String(format: "%.2f", duration))ms，无 64KB 缓冲区死锁）")
+    case .failure(let error):
+        runner.expectTrue(false, "超长脚本执行失败：\(error.localizedDescription)")
+    case nil:
+        runner.expectTrue(false, "超长脚本死锁超时未返回（>5s）")
+    }
+}
+
+runner.run("AutoTagger 大体积防爆与超长文本标签") {
+    // 超过 256KB 的 JSON 文本应跳过全量解析，防止 UI 卡顿
+    let hugeJSON = "{\"key\": \"" + String(repeating: "a", count: 300_000) + "\"}"
+    let startJSON = Date()
+    let isJson = AutoTagger.isJSON(hugeJSON)
+    let durationJSON = -startJSON.timeIntervalSinceNow * 1000
+    runner.expectFalse(isJson, ">256KB 文本直接拒绝 JSON 全量解析")
+    runner.expectTrue(durationJSON < 5.0, ">256KB 文本拒绝判定应小于 5ms，实际 \(String(format: "%.2f", durationJSON))ms")
+
+    // 1MB 超长文本采样识别标签
+    let hugeText = (1...25000).map { "import Foundation\nfunc test\($0)() { return 0 }\n" }.joined()
+    let startTags = Date()
+    let tags = AutoTagger.tags(for: hugeText, kind: .text)
+    let durationTags = -startTags.timeIntervalSinceNow * 1000
+    runner.expectTrue(tags.contains("代码"), "前置 16KB 采样准确识别为代码")
+    runner.expectTrue(durationTags < 20.0, "1MB 大文本采样标签耗时小于 20ms，实际 \(String(format: "%.2f", durationTags))ms")
 }
 
 print("----")

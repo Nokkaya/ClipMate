@@ -20,17 +20,23 @@ public enum AutoTagger {
     private static func textTags(for text: String) -> [String] {
         var tags: [String] = []
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        guard !trimmed.isEmpty else { return tags }
+
+        // 优化：对于超长文本采样前 16KB 字符，避免对大体积日志/数据做全量正则扫描与关键字过滤
+        let scanLimit = min(trimmed.count, 16384)
+        let sampleIndex = trimmed.index(trimmed.startIndex, offsetBy: scanLimit)
+        let sample = String(trimmed[..<sampleIndex])
+        let sampleRange = NSRange(sample.startIndex..., in: sample)
 
         if trimmed.contains("\n") {
             if isJSON(trimmed) { tags.append("JSON") }
-            else if isCode(trimmed) { tags.append("代码") }
+            else if isCode(sample) { tags.append("代码") }
             else { tags.append("长文本") }
         } else {
-            if emailRegex?.firstMatch(in: trimmed, range: range) != nil { tags.append("邮箱") }
+            if sample.count <= 512, emailRegex?.firstMatch(in: sample, range: sampleRange) != nil { tags.append("邮箱") }
         }
-        if urlRegex?.firstMatch(in: trimmed, range: range) != nil { tags.append("含链接") }
-        if detectColor(in: trimmed) != nil { tags.append("颜色") }
+        if urlRegex?.firstMatch(in: sample, range: sampleRange) != nil { tags.append("含链接") }
+        if sample.count <= 64, detectColor(in: sample) != nil { tags.append("颜色") }
         return tags
     }
 
@@ -60,6 +66,8 @@ public enum AutoTagger {
 
     public static func isJSON(_ text: String) -> Bool {
         guard text.hasPrefix("{") || text.hasPrefix("[") else { return false }
+        // 优化：超过 256KB 的文本避免调用 JSONSerialization 尝试全量解析，防止内存与 CPU 暴涨
+        guard text.utf8.count <= 262_144 else { return false }
         return (try? JSONSerialization.jsonObject(with: Data(text.utf8))) != nil
     }
 }

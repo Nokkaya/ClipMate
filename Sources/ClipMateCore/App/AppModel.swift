@@ -19,7 +19,6 @@ final class AppModel {
 
     private var hotkeyObserver: NSObjectProtocol?
     private var retentionTimer: Timer?
-    private var captureCount = 0
 
     init() throws {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -66,13 +65,6 @@ final class AppModel {
         monitor.onCaptured = { [weak self] item in
             guard let self else { return }
             self.panel.viewModel.handleCaptured(item)
-            self.captureCount += 1
-            if self.captureCount % 10 == 0 {
-                try? self.store.enforceRetention(
-                    maxItems: self.settings.retentionMaxItems,
-                    maxAgeDays: self.settings.retentionMaxAgeDays
-                )
-            }
             if self.settings.soundOnCapture {
                 NSSound(named: "Tink")?.play()
             }
@@ -80,6 +72,9 @@ final class AppModel {
             if item.kind == .text || item.kind == .url, !item.plainText.isEmpty {
                 self.embeddingBackfill?.embedIfNeeded(id: item.id, text: item.plainText)
             }
+        }
+        monitor.onItemUpdated = { [weak self] item in
+            self?.panel.viewModel.handleCaptured(item)
         }
         monitor.start()
 
@@ -101,16 +96,23 @@ final class AppModel {
         menuBar.onImportHistory = { [weak self] in self?.importHistory() }
         menuBar.install()
 
-        try? store.enforceRetention(
-            maxItems: settings.retentionMaxItems,
-            maxAgeDays: settings.retentionMaxAgeDays
-        )
-        retentionTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+        // 保留策略：启动与每小时在后台 utility 队列执行，绝不阻塞主线程
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             try? self.store.enforceRetention(
                 maxItems: self.settings.retentionMaxItems,
                 maxAgeDays: self.settings.retentionMaxAgeDays
             )
+        }
+        retentionTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                guard let self else { return }
+                try? self.store.enforceRetention(
+                    maxItems: self.settings.retentionMaxItems,
+                    maxAgeDays: self.settings.retentionMaxAgeDays
+                )
+            }
         }
         // 存量数据向量补算（后台，低优先级）
         embeddingBackfill?.backfillAll()

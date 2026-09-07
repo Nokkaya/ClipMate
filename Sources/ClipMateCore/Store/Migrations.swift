@@ -24,6 +24,7 @@ enum Migrations {
         );
         CREATE INDEX IF NOT EXISTS idx_clip_list ON clip(pinned DESC, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_clip_hash ON clip(content_hash);
+        CREATE INDEX IF NOT EXISTS idx_clip_blob ON clip(blob_name);
         """)
 
         // FTS5 外部内容表 + 触发器同步；不可用时由 ClipStore 降级 LIKE。

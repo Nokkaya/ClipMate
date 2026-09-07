@@ -22,7 +22,7 @@ public enum ClipboardReader {
 
         if let content = readFileURLs(pb: pb) { return content }
         if let content = readPDF(pb: pb, maxBytes: maxBytes) { return content }
-        if let content = readImage(pb: pb, maxBytes: maxBytes, ocrEnabled: ocrEnabled) { return content }
+        if let content = readImage(pb: pb, maxBytes: maxBytes) { return content }
         if let content = readRichText(pb: pb, maxBytes: maxBytes) { return content }
         if let content = readPlainText(pb: pb, maxBytes: maxBytes) { return content }
         return nil
@@ -69,7 +69,7 @@ public enum ClipboardReader {
         )
     }
 
-    private static func readImage(pb: NSPasteboard, maxBytes: Int, ocrEnabled: Bool) -> CapturedContent? {
+    private static func readImage(pb: NSPasteboard, maxBytes: Int) -> CapturedContent? {
         guard let data = pb.data(forType: .png) ?? pb.data(forType: .tiff),
               !data.isEmpty, data.count <= maxBytes else { return nil }
         guard let thumbnail = ImageHelper.thumbnailData(from: data, maxPixel: 512) else { return nil }
@@ -78,19 +78,11 @@ public enum ClipboardReader {
             meta["display"] = "图片 \(w)×\(h)"
         }
 
-        // OCR：识别文字并入 plainText，让截图内容可检索（后台队列执行，不阻塞 UI）。
-        var tags = AutoTagger.tags(for: "", kind: .image)
-        var plainText = ""
-        if ocrEnabled, let text = recognizeText(in: data) {
-            plainText = String(text.prefix(4000))
-            tags.insert("OCR", at: 0)
-            meta["ocr"] = "1"
-        }
-
+        // 优化：OCR 改为入库后后台异步执行，绝不阻塞当前采集队列
         return CapturedContent(
             kind: .image,
-            plainText: plainText,
-            tags: tags,
+            plainText: "",
+            tags: AutoTagger.tags(for: "", kind: .image),
             inlineData: thumbnail,
             imageOriginal: data,
             meta: meta

@@ -319,6 +319,24 @@ public final class ClipStore {
         resetEmbeddingCache()
     }
 
+    /// 异步 OCR 识别完成后补充文字信息与标签，触发 FTS5 自动索引更新
+    @discardableResult
+    public func updateOCR(_ id: Int64, text: String) throws -> ClipItem? {
+        guard let existing = item(id: id) else { return nil }
+        var tags = existing.tags
+        if !tags.contains("OCR") {
+            tags.insert("OCR", at: 0)
+        }
+        var meta = existing.meta
+        meta["ocr"] = "1"
+        let statement = try db.prepare("""
+            UPDATE clip SET plain_text = ?, tags = ?, meta = ? WHERE id = ?
+            """)
+        statement.bind([.text(text), .text(json(tags)), .text(json(meta)), .int(id)])
+        try statement.run()
+        return item(id: id)
+    }
+
     public func delete(_ id: Int64) throws {
         if let item = item(id: id), let blobName = item.blobName {
             blobs.remove(blobName)

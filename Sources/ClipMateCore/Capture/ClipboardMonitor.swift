@@ -7,6 +7,7 @@ public final class ClipboardMonitor {
     private let settings: AppSettings
     private let store: ClipStore
     private let captureQueue = DispatchQueue(label: "clipmate.capture", qos: .utility)
+    private let ocrQueue = DispatchQueue(label: "clipmate.ocr", qos: .utility)
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var suppressUntil = Date.distantPast
@@ -15,6 +16,8 @@ public final class ClipboardMonitor {
 
     /// 采集成功回调（主线程）。
     public var onCaptured: ((ClipItem) -> Void)?
+    /// 条目内容异步更新回调（如 OCR 识别完成，主线程）。
+    public var onItemUpdated: ((ClipItem) -> Void)?
 
     public init(settings: AppSettings, store: ClipStore) {
         self.settings = settings
@@ -76,6 +79,26 @@ public final class ClipboardMonitor {
                 )
                 DispatchQueue.main.async {
                     self.onCaptured?(result.item)
+                }
+
+                // 优化：图片入库后后台异步 OCR，绝不阻塞采集与主线程，识别完成后异步更新 DB 与 UI
+                if content.kind == .image && self.settings.imageOCREnabled && result.isNew,
+                   let originalData = content.imageOriginal ?? content.inlineData {
+                    let itemId = result.item.id
+                    self.ocrQueue.async { [weak self] in
+                        guard let self else { return }
+                        guard let text = ClipboardReader.recognizeText(in: originalData) else { return }
+                        let ocrText = String(text.prefix(4000))
+                        do {
+                            if let updatedItem = try self.store.updateOCR(itemId, text: ocrText) {
+                                DispatchQueue.main.async {
+                                    self.onItemUpdated?(updatedItem)
+                                }
+                            }
+                        } catch {
+                            NSLog("ClipMate OCR update failed: \(error)")
+                        }
+                    }
                 }
             } catch {
                 NSLog("ClipMate capture failed: \(error)")
