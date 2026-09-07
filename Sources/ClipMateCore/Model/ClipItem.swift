@@ -19,18 +19,56 @@ public struct ClipItem: Identifiable, Equatable {
     public var inlineData: Data?
     public var blobName: String?
 
+    public init(id: Int64, kind: ClipKind, plainText: String, sourceBundle: String, sourceName: String,
+                byteSize: Int, createdAt: Date, lastUsedAt: Date, useCount: Int, pinned: Bool,
+                tags: [String], title: String? = nil, meta: [String: String],
+                inlineData: Data? = nil, blobName: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.plainText = plainText
+        self.sourceBundle = sourceBundle
+        self.sourceName = sourceName
+        self.byteSize = byteSize
+        self.createdAt = createdAt
+        self.lastUsedAt = lastUsedAt
+        self.useCount = useCount
+        self.pinned = pinned
+        self.tags = tags
+        self.title = title
+        self.meta = meta
+        self.inlineData = inlineData
+        self.blobName = blobName
+    }
+
     /// 列表行的单行展示文本。
     public var displayText: String {
         switch kind {
         case .image:
             return meta["display"] ?? "图片"
         case .file:
-            return meta["display"] ?? (plainText.components(separatedBy: "\n").first ?? "文件")
+            if let display = meta["display"], !display.isEmpty { return display }
+            let prefix = plainText.prefix(500)
+            if let newlineIndex = prefix.firstIndex(where: { $0.isNewline }) {
+                let first = String(prefix[..<newlineIndex])
+                return first.isEmpty ? "文件" : first
+            }
+            return prefix.isEmpty ? "文件" : String(prefix)
         default:
-            let line = plainText
-                .components(separatedBy: .newlines)
-                .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
-            return String(line.prefix(300))
+            // 避免对整段大文本（如数 MB 的日志/JSON）进行全量 components(separatedBy:) 内存切片，
+            // 仅在首部有限前缀内快速寻找首个非空行，O(1) 内存开销
+            let prefix = plainText.prefix(2000)
+            var start = prefix.startIndex
+            while start < prefix.endIndex {
+                let remainder = prefix[start...]
+                let lineEnd = remainder.firstIndex(where: { $0.isNewline }) ?? prefix.endIndex
+                let line = prefix[start..<lineEnd].trimmingCharacters(in: .whitespaces)
+                if !line.isEmpty {
+                    return String(line.prefix(300))
+                }
+                if lineEnd == prefix.endIndex { break }
+                start = prefix.index(after: lineEnd)
+            }
+            return ""
         }
     }
 }

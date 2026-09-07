@@ -148,24 +148,31 @@ struct FilterChips: View {
 
 struct ClipList: View {
     @ObservedObject var viewModel: PanelViewModel
+    @State private var lastClickTime: TimeInterval = 0
+    @State private var lastClickID: Int64 = 0
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(Array(viewModel.items.enumerated()), id: \.element.id) { index, item in
+                    ForEach(viewModel.items) { item in
                         ClipRowView(
                             item: item,
-                            selected: index == viewModel.selectedIndex,
+                            selected: item.id == viewModel.selectedID,
                             multiSelected: viewModel.multiSelectedIDs.contains(item.id),
                             thumbnail: viewModel.thumbnail(for: item)
                         )
-                        .id(index)
-                        .onTapGesture(count: 2) {
-                            viewModel.pasteIndex(index)
-                        }
+                        .equatable()
+                        .id(item.id)
                         .onTapGesture {
-                            viewModel.selectOnly(at: index)
+                            let now = ProcessInfo.processInfo.systemUptime
+                            if now - lastClickTime < 0.35 && lastClickID == item.id {
+                                viewModel.paste(item: item)
+                            } else {
+                                viewModel.selectOnly(item: item)
+                            }
+                            lastClickTime = now
+                            lastClickID = item.id
                         }
                         .contextMenu { ContextMenuItems(viewModel: viewModel, item: item) }
                     }
@@ -173,11 +180,14 @@ struct ClipList: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
-            .onChange(of: viewModel.selectedIndex) { newValue in
-                // 仅键盘导航滚动；鼠标点选不触发滚动动画
-                if viewModel.scrollRequested {
-                    proxy.scrollTo(newValue, anchor: .center)
-                    viewModel.scrollRequested = false
+            // 切换分类时重置滚动视图至顶部，避免旧偏移量导致的白屏/列表内容出界
+            .id(viewModel.filter)
+            .onChange(of: viewModel.selectedID) { newID in
+                guard let newID else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    proxy.scrollTo(newID)
                 }
             }
             .scrollIndicators(.hidden)

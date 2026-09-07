@@ -52,34 +52,34 @@ public final class ClipboardMonitor {
         if frontApp.processIdentifier == ProcessInfo.processInfo.processIdentifier { return }
         if let bundle = frontApp.bundleIdentifier, settings.excludedApps.contains(bundle) { return }
 
+        let bundleID = frontApp.bundleIdentifier ?? ""
+        let appName = frontApp.localizedName ?? ""
         let changeCount = pb.changeCount
         captureQueue.async { [weak self] in
             guard let self else { return }
             guard let content = ClipboardReader.read(from: pb, maxBytes: self.settings.maxCaptureBytes,
                                                      ocrEnabled: self.settings.imageOCREnabled) else { return }
-            DispatchQueue.main.async {
-                // 读取期间剪贴板又变了：放弃本次，交给下一轮。
-                guard NSPasteboard.general.changeCount == changeCount else { return }
-                self.persist(content, app: frontApp)
-            }
-        }
-    }
+            // 读取期间剪贴板又变了：放弃本次，交给下一轮。
+            guard NSPasteboard.general.changeCount == changeCount else { return }
 
-    private func persist(_ content: CapturedContent, app: NSRunningApplication) {
-        do {
-            let result = try store.capture(
-                kind: content.kind,
-                plainText: content.plainText,
-                sourceBundle: app.bundleIdentifier ?? "",
-                sourceName: app.localizedName ?? "",
-                tags: content.tags,
-                inlineData: content.inlineData,
-                imageOriginal: content.imageOriginal,
-                meta: content.meta
-            )
-            onCaptured?(result.item)
-        } catch {
-            NSLog("ClipMate capture failed: \(error)")
+            // 优化：大文件落盘、哈希计算、SQLite 插入与 FTS5 分词在后台完成，避免主线程磁盘 I/O 阻塞
+            do {
+                let result = try self.store.capture(
+                    kind: content.kind,
+                    plainText: content.plainText,
+                    sourceBundle: bundleID,
+                    sourceName: appName,
+                    tags: content.tags,
+                    inlineData: content.inlineData,
+                    imageOriginal: content.imageOriginal,
+                    meta: content.meta
+                )
+                DispatchQueue.main.async {
+                    self.onCaptured?(result.item)
+                }
+            } catch {
+                NSLog("ClipMate capture failed: \(error)")
+            }
         }
     }
 

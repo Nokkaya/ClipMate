@@ -81,18 +81,26 @@ public enum PasteBack {
 
     // MARK: - 合成 ⌘V
 
-    public static func pasteToFrontmost(pid: pid_t) -> Bool {
+    @discardableResult
+    public static func pasteToFrontmost(pid: pid_t, completion: ((Bool) -> Void)? = nil) -> Bool {
         guard isAccessibilityGranted() else {
             promptAccessibility()
+            completion?(false)
             return false
         }
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true),
-              let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false) else { return false }
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false) else {
+            completion?(false)
+            return false
+        }
         down.flags = .maskCommand
         up.flags = .maskCommand
         down.postToPid(pid)
-        usleep(25_000)
-        up.postToPid(pid)
+        // 优化：避免 usleep(25_000) 阻塞主线程，采用非阻塞延迟派发 keyUp
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) {
+            up.postToPid(pid)
+            completion?(true)
+        }
         return true
     }
 
@@ -105,9 +113,10 @@ public enum PasteBack {
         suppress?(1.8)
         guard let pid, pid > 0 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            let posted = pasteToFrontmost(pid: pid)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                if posted, let snapshot { restorePasteboard(snapshot) }
+            pasteToFrontmost(pid: pid) { success in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    if success, let snapshot { restorePasteboard(snapshot) }
+                }
             }
         }
     }

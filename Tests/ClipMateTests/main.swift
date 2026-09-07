@@ -411,6 +411,38 @@ runner.run("自定义脚本执行（stdin/stdout）") {
     }
 }
 
+runner.run("大文本与首行 displayText 性能与正确性") {
+    // 构造包含 20,000 行的大文本
+    let largeText = (1...20000).map { "Line \($0): some long text content description" }.joined(separator: "\n")
+    let item = ClipItem(
+        id: 1, kind: .text, plainText: largeText, sourceBundle: "test", sourceName: "Test",
+        byteSize: largeText.utf8.count, createdAt: Date(), lastUsedAt: Date(), useCount: 1,
+        pinned: false, tags: [], meta: [:]
+    )
+    let start = Date()
+    let display = item.displayText
+    let duration = -start.timeIntervalSinceNow * 1000
+    runner.expectEqual(display, "Line 1: some long text content description", "首行正确提取")
+    runner.expectTrue(duration < 10.0, "20,000 行文本提取首行耗时应低于 10ms，实际 \(String(format: "%.2f", duration))ms")
+
+    // 前置连续空行与首行超长截断测试
+    let leadingEmptyText = "\n\n  \n\t\n" + String(repeating: "A", count: 500) + "\nSecond Line"
+    let item2 = ClipItem(
+        id: 2, kind: .text, plainText: leadingEmptyText, sourceBundle: "test", sourceName: "Test",
+        byteSize: leadingEmptyText.utf8.count, createdAt: Date(), lastUsedAt: Date(), useCount: 1,
+        pinned: false, tags: [], meta: [:]
+    )
+    runner.expectEqual(item2.displayText.count, 300, "超长首行截断至 300 字符")
+    runner.expectTrue(item2.displayText.allSatisfy { $0 == "A" }, "跳过空行后正确提取首个非空行")
+
+    // 文件类型测试
+    let fileItem = ClipItem(
+        id: 3, kind: .file, plainText: "/path/to/file1.txt\n/path/to/file2.txt", sourceBundle: "test", sourceName: "Test",
+        byteSize: 100, createdAt: Date(), lastUsedAt: Date(), useCount: 1, pinned: false, tags: [], meta: [:]
+    )
+    runner.expectEqual(fileItem.displayText, "/path/to/file1.txt", "文件条目提取首行路径")
+}
+
 print("----")
 if runner.failures.isEmpty {
     print("全部 \(runner.passed) 个用例通过 ✅")

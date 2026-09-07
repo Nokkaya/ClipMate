@@ -7,8 +7,8 @@ public final class PanelViewModel: ObservableObject {
     @Published public var filter: FilterKind = .all
     @Published public var items: [ClipItem] = []
     @Published public var selectedIndex = 0
-    /// 键盘导航后需要滚动到选中行（鼠标点选不滚动，避免动画卡顿）。
-    @Published public var scrollRequested = false
+    /// 选中锚点：以条目 id 记录，列表重排（新采集置顶等）后选中不漂移。
+    @Published public var selectedID: Int64?
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
@@ -34,8 +34,6 @@ public final class PanelViewModel: ObservableObject {
     var openSettings: (() -> Void)?
 
     private var searchTask: Task<Void, Never>?
-    /// 选中锚点：以条目 id 记录，列表重排（新采集置顶等）后选中不漂移。
-    private var selectedID: Int64?
     private let thumbCache = NSCache<NSNumber, NSImage>()
 
     public init(store: ClipStore, settings: AppSettings, monitor: ClipboardMonitor,
@@ -49,27 +47,67 @@ public final class PanelViewModel: ObservableObject {
 
     // MARK: - 数据
 
-    public func reload() {
-        items = store.search(query: query, filter: filter, limit: 300)
-        // 选中按 id 锚定：原条目仍可见则保持，否则退回按行号钳制
-        if let id = selectedID, let index = items.firstIndex(where: { $0.id == id }) {
-            selectedIndex = index
-        } else if selectedIndex >= items.count {
-            selectedIndex = max(0, items.count - 1)
+    // MARK: - 数据
+
+    public func reload(resetSelection: Bool = false) {
+        let q = query
+        let f = filter
+        if q.isEmpty {
+            searchTask?.cancel()
+            searchTask = nil
+            let results = store.search(query: q, filter: f, limit: 300)
+            applySearchResults(results, resetSelection: resetSelection)
+        } else {
+            searchTask?.cancel()
+            let store = self.store
+            searchTask = Task.detached(priority: .userInitiated) { [weak self] in
+                let results = store.search(query: q, filter: f, limit: 300)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    guard let self, self.query == q, self.filter == f else { return }
+                    self.applySearchResults(results, resetSelection: resetSelection)
+                }
+            }
         }
-        selectedID = items.indices.contains(selectedIndex) ? items[selectedIndex].id : nil
-        // 多选只对当前可见列表有意义，清理失效引用
-        let visibleIDs = Set(items.map(\.id))
-        multiSelectedIDs.formIntersection(visibleIDs)
     }
 
     public func queryChanged() {
         searchTask?.cancel()
-        searchTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            guard !Task.isCancelled else { return }
-            self?.reload()
+        let q = query
+        let f = filter
+        if q.isEmpty {
+            reload(resetSelection: true)
+            return
         }
+        let store = self.store
+        searchTask = Task.detached(priority: .userInitiated) { [weak self] in
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard !Task.isCancelled else { return }
+            let results = store.search(query: q, filter: f, limit: 300)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.query == q, self.filter == f else { return }
+                self.applySearchResults(results, resetSelection: true)
+            }
+        }
+    }
+
+    private func applySearchResults(_ newItems: [ClipItem], resetSelection: Bool = false) {
+        items = newItems
+        if resetSelection || selectedID == nil {
+            selectedIndex = 0
+            selectedID = items.first?.id
+        } else if let id = selectedID, let index = items.firstIndex(where: { $0.id == id }) {
+            selectedIndex = index
+        } else if selectedIndex >= items.count {
+            selectedIndex = max(0, items.count - 1)
+            selectedID = items.indices.contains(selectedIndex) ? items[selectedIndex].id : nil
+        } else {
+            selectedID = items.indices.contains(selectedIndex) ? items[selectedIndex].id : nil
+        }
+        // 多选只对当前可见列表有意义，清理失效引用
+        let visibleIDs = Set(items.map(\.id))
+        multiSelectedIDs.formIntersection(visibleIDs)
     }
 
     public func handleCaptured(_ item: ClipItem) {
@@ -77,16 +115,19 @@ public final class PanelViewModel: ObservableObject {
     }
 
     public var selectedItem: ClipItem? {
-        items.indices.contains(selectedIndex) ? items[selectedIndex] : nil
+        if let id = selectedID, let item = items.first(where: { $0.id == id }) {
+            return item
+        }
+        return items.indices.contains(selectedIndex) ? items[selectedIndex] : nil
     }
 
     // MARK: - 选择与过滤
 
     public func moveSelection(_ delta: Int) {
         guard !items.isEmpty else { return }
-        selectedIndex = min(max(0, selectedIndex + delta), items.count - 1)
-        selectedID = items[selectedIndex].id
-        scrollRequested = true
+        let nextIndex = min(max(0, selectedIndex + delta), items.count - 1)
+        selectedIndex = nextIndex
+        selectedID = items[nextIndex].id
     }
 
     public func cycleFilter() {
@@ -95,12 +136,14 @@ public final class PanelViewModel: ObservableObject {
         changeFilter(all[(index + 1) % all.count])
     }
 
-    /// 切换分类：多选属于某个列表视图的状态，切换时一并清除。
+    /// 切换分类：多选清除，选中重置到首项，刷新列表
     public func changeFilter(_ kind: FilterKind) {
         guard filter != kind else { return }
         filter = kind
         clearMultiSelection()
-        reload()
+        selectedIndex = 0
+        selectedID = nil
+        reload(resetSelection: true)
     }
 
     /// 单选语义：点击行 = 只选中这一行，清除批量多选残留。
@@ -109,6 +152,14 @@ public final class PanelViewModel: ObservableObject {
         selectedIndex = index
         selectedID = items[index].id
         clearMultiSelection()
+    }
+
+    public func selectOnly(item: ClipItem) {
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            selectedIndex = index
+            selectedID = item.id
+            clearMultiSelection()
+        }
     }
 
     // MARK: - 动作
@@ -263,7 +314,6 @@ public final class PanelViewModel: ObservableObject {
         selectedIndex = next
         selectedID = items[next].id
         multiSelectedIDs.insert(items[next].id)
-        scrollRequested = true
     }
 
     public func clearMultiSelection() {

@@ -11,7 +11,18 @@ public final class ClipStore {
     /// 语义检索的向量生成器（文本 → 向量二进制）；nil 表示未启用。
     private let embeddingProvider: ((String) -> Data?)?
     /// 向量缓存：id → float 数组（懒加载，写操作后失效）。
+    private let cacheLock = NSLock()
     private var embeddingCache: [Int64: [Float]]?
+
+    public func invalidateEmbeddingCache() {
+        resetEmbeddingCache()
+    }
+
+    private func resetEmbeddingCache() {
+        cacheLock.lock()
+        embeddingCache = nil
+        cacheLock.unlock()
+    }
 
     public init(database: Database,
                 blobStore: BlobStore,
@@ -244,20 +255,21 @@ public final class ClipStore {
         return collect(statement)
     }
 
-    /// 后台补算写入后由主实例调用，刷新向量缓存。
-    public func invalidateEmbeddingCache() {
-        embeddingCache = nil
-    }
-
     public func setEmbedding(_ id: Int64, _ data: Data) {
         guard let statement = try? db.prepare("UPDATE clip SET embedding = ? WHERE id = ?") else { return }
         statement.bind([.blob(data), .int(id)])
         try? statement.run()
-        embeddingCache = nil
+        resetEmbeddingCache()
     }
 
     private func embeddingVectors() -> [Int64: [Float]] {
-        if let cache = embeddingCache { return cache }
+        cacheLock.lock()
+        if let cache = embeddingCache {
+            cacheLock.unlock()
+            return cache
+        }
+        cacheLock.unlock()
+
         var cache: [Int64: [Float]] = [:]
         if let statement = try? db.prepare("SELECT id, embedding FROM clip WHERE embedding IS NOT NULL") {
             while statement.step() {
@@ -266,7 +278,9 @@ public final class ClipStore {
                 }
             }
         }
+        cacheLock.lock()
         embeddingCache = cache
+        cacheLock.unlock()
         return cache
     }
 
@@ -302,7 +316,7 @@ public final class ClipStore {
             """)
         statement.bind([.text(text), .blob(hashData), .int(Int64(text.utf8.count)), .int(id)])
         try statement.run()
-        embeddingCache = nil
+        resetEmbeddingCache()
     }
 
     public func delete(_ id: Int64) throws {
@@ -312,13 +326,13 @@ public final class ClipStore {
         let statement = try db.prepare("DELETE FROM clip WHERE id = ?")
         statement.bind([.int(id)])
         try statement.run()
-        embeddingCache = nil
+        resetEmbeddingCache()
     }
 
     public func deleteAll(keepPinned: Bool) throws {
         let statement = try db.prepare(keepPinned ? "DELETE FROM clip WHERE pinned = 0" : "DELETE FROM clip")
         try statement.run()
-        embeddingCache = nil
+        resetEmbeddingCache()
         cleanupOrphanBlobs()
     }
 
@@ -338,7 +352,7 @@ public final class ClipStore {
             statement.bind([.int(Int64(maxItems))])
             try statement.run()
         }
-        embeddingCache = nil
+        resetEmbeddingCache()
         cleanupOrphanBlobs()
     }
 

@@ -27,12 +27,23 @@ extension ClipKind {
 
 /// 历史列表行：类型图标/缩略图 + 内容预览 + 来源应用 + 时间 + 标签。
 /// 悬停高亮用行内 @State：只有该行重算，避免鼠标划过时整列表刷新。
-struct ClipRowView: View {
+struct ClipRowView: View, Equatable {
     let item: ClipItem
     let selected: Bool
     var multiSelected: Bool = false
     let thumbnail: NSImage?
     @State private var hovered = false
+
+    static func == (lhs: ClipRowView, rhs: ClipRowView) -> Bool {
+        lhs.item.id == rhs.item.id &&
+        lhs.selected == rhs.selected &&
+        lhs.multiSelected == rhs.multiSelected &&
+        lhs.item.pinned == rhs.item.pinned &&
+        lhs.item.useCount == rhs.item.useCount &&
+        lhs.item.tags == rhs.item.tags &&
+        lhs.item.displayText == rhs.item.displayText &&
+        lhs.thumbnail === rhs.thumbnail
+    }
 
     var body: some View {
         HStack(spacing: 10) {
