@@ -24,7 +24,7 @@ final class PanelController {
         self.frontApps = frontApps
         viewModel = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: frontApps, ai: ai)
         panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 540),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -32,7 +32,9 @@ final class PanelController {
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // 系统窗口阴影在透明窗口上每次内容变化都要整体重算（卡顿源之一），
+        // 改由 SwiftUI 在窗口内绘制阴影（见 PanelView 的 720×540 边距设计）。
+        panel.hasShadow = false
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]

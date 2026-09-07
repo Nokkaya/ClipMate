@@ -158,7 +158,7 @@ final class AIWorkspaceController {
     init(ai: AIService, store: ClipStore, monitor: ClipboardMonitor, settings: AppSettings) {
         model = AIWorkspaceModel(ai: ai, store: store, monitor: monitor, settings: settings)
         panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 700),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -166,7 +166,7 @@ final class AIWorkspaceController {
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false // 同主面板：阴影由 SwiftUI 绘制，避免透明窗口阴影重算
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true

@@ -12,7 +12,7 @@ struct PanelView: View {
             if viewModel.showConfirmClear { ConfirmClearOverlay(viewModel: viewModel) }
             if viewModel.previewItem != nil { PreviewOverlay(viewModel: viewModel) }
         }
-        .frame(width: 660, height: 480)
+        .frame(width: 720, height: 540) // 窗口比内容大一圈：给 SwiftUI 阴影留出绘制空间
     }
 
     private var mainContent: some View {
@@ -28,6 +28,7 @@ struct PanelView: View {
             Divider().overlay(Color.primary.opacity(0.08))
             FooterBar()
         }
+        .frame(width: 660, height: 480)
         .background(VisualEffectBackground())
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -156,7 +157,6 @@ struct ClipList: View {
                         ClipRowView(
                             item: item,
                             selected: index == viewModel.selectedIndex,
-                            hovered: viewModel.hoverIndex == index,
                             multiSelected: viewModel.multiSelectedIDs.contains(item.id),
                             thumbnail: viewModel.thumbnail(for: item)
                         )
@@ -167,9 +167,6 @@ struct ClipList: View {
                         .onTapGesture {
                             viewModel.selectOnly(at: index)
                         }
-                        .onHover { hovering in
-                            viewModel.hoverIndex = hovering ? index : (viewModel.hoverIndex == index ? nil : viewModel.hoverIndex)
-                        }
                         .contextMenu { ContextMenuItems(viewModel: viewModel, item: item) }
                     }
                 }
@@ -177,7 +174,11 @@ struct ClipList: View {
                 .padding(.vertical, 6)
             }
             .onChange(of: viewModel.selectedIndex) { newValue in
-                proxy.scrollTo(newValue, anchor: .center)
+                // 仅键盘导航滚动；鼠标点选不触发滚动动画
+                if viewModel.scrollRequested {
+                    proxy.scrollTo(newValue, anchor: .center)
+                    viewModel.scrollRequested = false
+                }
             }
             .scrollIndicators(.hidden)
         }

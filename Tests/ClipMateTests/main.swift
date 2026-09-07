@@ -2,6 +2,35 @@ import Foundation
 import AppKit
 import ClipMateCore
 
+// 性能基准（环境变量触发）：CLIPMATE_BENCH_DB=/path/to/db.sqlite swift run ClipMateTests
+if let benchPath = ProcessInfo.processInfo.environment["CLIPMATE_BENCH_DB"], !benchPath.isEmpty {
+    let db = try Database(url: URL(fileURLWithPath: benchPath))
+    let store = try ClipStore(database: db, blobStore: BlobStore(directory: URL(fileURLWithPath: benchPath + "-blobs")))
+    print("== 基准测试（真实数据副本）==")
+    print("条目总数: \(store.itemCount())  已向量化: \(store.embeddedCount)  FTS5: \(store.supportsFullTextSearch)")
+    for filter in FilterKind.allCases {
+        _ = store.search(query: "", filter: filter, limit: 300) // 预热
+        let start = Date()
+        for _ in 0..<10 { _ = store.search(query: "", filter: filter, limit: 300) }
+        print(String(format: "筛选[%@]      %6.2f ms/次", filter.title, -start.timeIntervalSinceNow / 10 * 1000))
+    }
+    var start = Date()
+    for _ in 0..<5 { _ = store.search(query: "error", filter: .all, limit: 300) }
+    print(String(format: "搜索[error语义] %5.2f ms/次", -start.timeIntervalSinceNow / 5 * 1000))
+    start = Date()
+    for _ in 0..<5 { _ = store.search(query: "剪贴板", filter: .all, limit: 300) }
+    print(String(format: "搜索[中文LIKE] %5.2f ms/次", -start.timeIntervalSinceNow / 5 * 1000))
+    let sampleDate = Date().addingTimeInterval(-3600)
+    start = Date()
+    for _ in 0..<100 { _ = TimeHelper.relative(sampleDate) }
+    print(String(format: "相对时间×100   %6.2f ms", -start.timeIntervalSinceNow * 1000))
+    if let st = try? db.prepare("SELECT COUNT(*), IFNULL(SUM(length(inline_data)),0) FROM clip WHERE inline_data IS NOT NULL"),
+       st.step() {
+        print("含缩略图条目: \(st.columnInt(0)) 条，inline_data 总量 \(Int(st.columnDouble(1)) / 1024) KB")
+    }
+    exit(0)
+}
+
 // ClipMate 单元测试 runner（本环境仅 Command Line Tools，无 XCTest，故用可执行目标实现）。
 // 运行：swift run ClipMateTests；失败时进程退出码为 1。
 

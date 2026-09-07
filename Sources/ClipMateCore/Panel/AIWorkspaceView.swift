@@ -25,8 +25,8 @@ struct AIWorkspaceView: View {
             }
             footer
         }
-        .padding(16)
-        .frame(width: 540, height: 640)
+        .padding(30)
+        .frame(width: 600, height: 700) // 窗口留边，阴影在窗口内绘制
         .background(VisualEffectBackground())
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(

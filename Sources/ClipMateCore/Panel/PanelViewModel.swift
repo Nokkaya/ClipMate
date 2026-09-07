@@ -7,7 +7,8 @@ public final class PanelViewModel: ObservableObject {
     @Published public var filter: FilterKind = .all
     @Published public var items: [ClipItem] = []
     @Published public var selectedIndex = 0
-    @Published public var hoverIndex: Int?
+    /// 键盘导航后需要滚动到选中行（鼠标点选不滚动，避免动画卡顿）。
+    @Published public var scrollRequested = false
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
@@ -57,12 +58,9 @@ public final class PanelViewModel: ObservableObject {
             selectedIndex = max(0, items.count - 1)
         }
         selectedID = items.indices.contains(selectedIndex) ? items[selectedIndex].id : nil
-        // 多选/悬停只对当前可见列表有意义，清理失效引用
+        // 多选只对当前可见列表有意义，清理失效引用
         let visibleIDs = Set(items.map(\.id))
         multiSelectedIDs.formIntersection(visibleIDs)
-        if let hover = hoverIndex, hover >= items.count {
-            hoverIndex = nil
-        }
     }
 
     public func queryChanged() {
@@ -88,6 +86,7 @@ public final class PanelViewModel: ObservableObject {
         guard !items.isEmpty else { return }
         selectedIndex = min(max(0, selectedIndex + delta), items.count - 1)
         selectedID = items[selectedIndex].id
+        scrollRequested = true
     }
 
     public func cycleFilter() {
@@ -264,6 +263,7 @@ public final class PanelViewModel: ObservableObject {
         selectedIndex = next
         selectedID = items[next].id
         multiSelectedIDs.insert(items[next].id)
+        scrollRequested = true
     }
 
     public func clearMultiSelection() {
