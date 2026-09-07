@@ -111,6 +111,7 @@ public final class PanelViewModel: ObservableObject {
     }
 
     public func handleCaptured(_ item: ClipItem) {
+        thumbCache.removeObject(forKey: NSNumber(value: item.id))
         reload()
     }
 
@@ -304,6 +305,12 @@ public final class PanelViewModel: ObservableObject {
 
     // MARK: - 批量多选
 
+    /// 全选当前视图下的所有可见条目
+    public func selectAllVisible() {
+        guard !items.isEmpty else { return }
+        multiSelectedIDs = Set(items.map(\.id))
+    }
+
     /// ⇧↑/⇧↓ 扩展多选（从当前选中行起）。
     public func extendSelection(_ delta: Int) {
         guard !items.isEmpty else { return }
@@ -318,6 +325,41 @@ public final class PanelViewModel: ObservableObject {
 
     public func clearMultiSelection() {
         multiSelectedIDs.removeAll()
+    }
+
+    /// 批量合并复制选中的条目（默认换行分隔）
+    public func copyMulti(separator: String = "\n") {
+        guard !multiSelectedIDs.isEmpty else { return }
+        let selected = items.filter { multiSelectedIDs.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        let merged = selected.map(\.plainText).filter { !$0.isEmpty }.joined(separator: separator)
+        guard !merged.isEmpty else { return }
+        PasteBack.write(.text(merged))
+        monitor.suppress(seconds: 1.5)
+        multiSelectedIDs.removeAll()
+    }
+
+    /// 批量固定 / 取消固定
+    public func togglePinMulti() {
+        guard !multiSelectedIDs.isEmpty else { return }
+        let selected = items.filter { multiSelectedIDs.contains($0.id) }
+        let allPinned = selected.allSatisfy(\.pinned)
+        let targetPinned = !allPinned
+        for item in selected {
+            try? store.setPinned(item.id, targetPinned)
+        }
+        reload()
+    }
+
+    /// 批量加入粘贴队列
+    public func enqueueMulti() {
+        guard !multiSelectedIDs.isEmpty else { return }
+        let selected = items.filter { multiSelectedIDs.contains($0.id) }
+        for item in selected {
+            if !queue.contains(where: { $0.id == item.id }), queue.count < 9 {
+                queue.append(item)
+            }
+        }
     }
 
     public func deleteMulti() {

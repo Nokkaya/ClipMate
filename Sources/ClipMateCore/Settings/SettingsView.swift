@@ -63,6 +63,7 @@ private struct CaptureTab: View {
             Stepper("保留最近 \(settings.retentionMaxAgeDays) 天", value: $settings.retentionMaxAgeDays, in: 1...365)
             Stepper("单条内容上限 \(settings.maxCaptureMB) MB", value: $settings.maxCaptureMB, in: 1...100)
             Toggle("图片文字识别（OCR 入库，截图内容可搜索）", isOn: $settings.imageOCREnabled)
+            Toggle("自动抓取链接标题与图标（后台轻量解析）", isOn: $settings.fetchLinkMetadata)
             HStack(spacing: 6) {
                 Image(systemName: store.supportsFullTextSearch ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
                     .foregroundStyle(store.supportsFullTextSearch ? Color.green : Color.orange)

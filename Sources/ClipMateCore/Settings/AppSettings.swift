@@ -87,6 +87,9 @@ public final class AppSettings: ObservableObject {
     @Published public var semanticSearchEnabled: Bool {
         didSet { defaults.set(semanticSearchEnabled, forKey: "semanticSearchEnabled") }
     }
+    @Published public var fetchLinkMetadata: Bool {
+        didSet { defaults.set(fetchLinkMetadata, forKey: "fetchLinkMetadata") }
+    }
     @Published public var customScripts: [ScriptAction] {
         didSet {
             if let data = try? JSONEncoder().encode(customScripts) {
@@ -123,6 +126,7 @@ public final class AppSettings: ObservableObject {
             "aiModel": "gpt-4o-mini",
             "imageOCREnabled": true,
             "semanticSearchEnabled": true,
+            "fetchLinkMetadata": true,
         ])
         hotkeyPresetID = defaults.string(forKey: "hotkeyPresetID") ?? "cmdShiftV"
         retentionMaxItems = defaults.integer(forKey: "retentionMaxItems")
@@ -137,6 +141,7 @@ public final class AppSettings: ObservableObject {
         aiModel = defaults.string(forKey: "aiModel") ?? "gpt-4o-mini"
         imageOCREnabled = defaults.object(forKey: "imageOCREnabled") as? Bool ?? true
         semanticSearchEnabled = defaults.object(forKey: "semanticSearchEnabled") as? Bool ?? true
+        fetchLinkMetadata = defaults.object(forKey: "fetchLinkMetadata") as? Bool ?? true
         if let scriptData = defaults.data(forKey: "customScripts") {
             customScripts = (try? JSONDecoder().decode([ScriptAction].self, from: scriptData)) ?? []
         } else {

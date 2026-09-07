@@ -30,16 +30,16 @@ enum Migrations {
         // FTS5 外部内容表 + 触发器同步；不可用时由 ClipStore 降级 LIKE。
         if db.hasFTS5 {
             try db.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS clip_fts USING fts5(plain_text, content='clip', content_rowid='id');
+            CREATE VIRTUAL TABLE IF NOT EXISTS clip_fts USING fts5(plain_text, title, content='clip', content_rowid='id');
             CREATE TRIGGER IF NOT EXISTS clip_ai AFTER INSERT ON clip BEGIN
-                INSERT INTO clip_fts(rowid, plain_text) VALUES (new.id, new.plain_text);
+                INSERT INTO clip_fts(rowid, plain_text, title) VALUES (new.id, new.plain_text, new.title);
             END;
             CREATE TRIGGER IF NOT EXISTS clip_ad AFTER DELETE ON clip BEGIN
-                INSERT INTO clip_fts(clip_fts, rowid, plain_text) VALUES ('delete', old.id, old.plain_text);
+                INSERT INTO clip_fts(clip_fts, rowid, plain_text, title) VALUES ('delete', old.id, old.plain_text, old.title);
             END;
-            CREATE TRIGGER IF NOT EXISTS clip_au AFTER UPDATE OF plain_text ON clip BEGIN
-                INSERT INTO clip_fts(clip_fts, rowid, plain_text) VALUES ('delete', old.id, old.plain_text);
-                INSERT INTO clip_fts(rowid, plain_text) VALUES (new.id, new.plain_text);
+            CREATE TRIGGER IF NOT EXISTS clip_au AFTER UPDATE OF plain_text, title ON clip BEGIN
+                INSERT INTO clip_fts(clip_fts, rowid, plain_text, title) VALUES ('delete', old.id, old.plain_text, old.title);
+                INSERT INTO clip_fts(rowid, plain_text, title) VALUES (new.id, new.plain_text, new.title);
             END;
             """)
         }
@@ -48,7 +48,31 @@ enum Migrations {
         if db.userVersion < 2, !columnExists(db, table: "clip", column: "embedding") {
             try db.execute("ALTER TABLE clip ADD COLUMN embedding BLOB")
         }
-        try db.execute("PRAGMA user_version = 2;")
+
+        // v3：FTS5 增加 title 列支持
+        if db.userVersion < 3 {
+            if db.hasFTS5 {
+                try? db.execute("""
+                DROP TRIGGER IF EXISTS clip_ai;
+                DROP TRIGGER IF EXISTS clip_ad;
+                DROP TRIGGER IF EXISTS clip_au;
+                DROP TABLE IF EXISTS clip_fts;
+                CREATE VIRTUAL TABLE IF NOT EXISTS clip_fts USING fts5(plain_text, title, content='clip', content_rowid='id');
+                CREATE TRIGGER IF NOT EXISTS clip_ai AFTER INSERT ON clip BEGIN
+                    INSERT INTO clip_fts(rowid, plain_text, title) VALUES (new.id, new.plain_text, new.title);
+                END;
+                CREATE TRIGGER IF NOT EXISTS clip_ad AFTER DELETE ON clip BEGIN
+                    INSERT INTO clip_fts(clip_fts, rowid, plain_text, title) VALUES ('delete', old.id, old.plain_text, old.title);
+                END;
+                CREATE TRIGGER IF NOT EXISTS clip_au AFTER UPDATE OF plain_text, title ON clip BEGIN
+                    INSERT INTO clip_fts(clip_fts, rowid, plain_text, title) VALUES ('delete', old.id, old.plain_text, old.title);
+                    INSERT INTO clip_fts(rowid, plain_text, title) VALUES (new.id, new.plain_text, new.title);
+                END;
+                INSERT INTO clip_fts(rowid, plain_text, title) SELECT id, plain_text, title FROM clip;
+                """)
+            }
+            try db.execute("PRAGMA user_version = 3;")
+        }
     }
 
     private static func columnExists(_ db: Database, table: String, column: String) -> Bool {

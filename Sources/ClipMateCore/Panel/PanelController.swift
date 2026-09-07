@@ -162,11 +162,19 @@ final class PanelController {
             } else if flags.contains(.command) && flags.contains(.option) {
                 viewModel.pasteAsPlainText()    // ⌘⌥⏎ 粘贴为纯文本
             } else if cmdOnly {
-                viewModel.copySelected()        // ⌘⏎ 仅复制
+                if viewModel.multiSelectedIDs.count > 1 {
+                    viewModel.copyMulti()       // ⌘⏎ 多选时合并复制
+                } else {
+                    viewModel.copySelected()    // ⌘⏎ 仅复制
+                }
             } else if flags.contains(.option) {
                 viewModel.beginEdit()           // ⌥⏎ 编辑
             } else if flags.contains(.shift) {
-                _ = viewModel.toggleQueue()     // ⇧⏎ 加入/移出队列
+                if viewModel.multiSelectedIDs.count > 1 {
+                    viewModel.enqueueMulti()    // ⇧⏎ 多选时批量入队
+                } else {
+                    _ = viewModel.toggleQueue() // ⇧⏎ 加入/移出队列
+                }
             } else {
                 viewModel.pasteSelected()       // ⏎ 粘贴
             }
@@ -197,8 +205,27 @@ final class PanelController {
         case 48: // Tab：循环切换分类
             viewModel.cycleFilter()
             return true
-        case 35 where cmdOnly: // ⌘P 固定
-            viewModel.togglePin()
+        case 0 where cmdOnly: // ⌘A 全选可见条目
+            if viewModel.query.isEmpty {
+                viewModel.selectAllVisible()
+                return true
+            }
+            return false
+        case 8 where cmdOnly: // ⌘C 复制 / 合并复制
+            if viewModel.multiSelectedIDs.count > 1 {
+                viewModel.copyMulti()
+                return true
+            } else if viewModel.query.isEmpty {
+                viewModel.copySelected()
+                return true
+            }
+            return false
+        case 35 where cmdOnly: // ⌘P 固定 / 批量固定
+            if viewModel.multiSelectedIDs.count > 1 {
+                viewModel.togglePinMulti()
+            } else {
+                viewModel.togglePin()
+            }
             return true
         case 34 where cmdOnly: // ⌘I 详情预览
             viewModel.togglePreview()

@@ -2,7 +2,7 @@ import Foundation
 
 /// 一条剪贴板历史。
 /// inlineData 存小对象（富文本 RTF/HTML、图片缩略图）；大对象走 BlobStore（blobName）。
-public struct ClipItem: Identifiable, Equatable {
+public struct ClipItem: Identifiable, Equatable, Sendable {
     public let id: Int64
     public var kind: ClipKind
     public var plainText: String
@@ -40,11 +40,14 @@ public struct ClipItem: Identifiable, Equatable {
         self.meta = meta
         self.inlineData = inlineData
         self.blobName = blobName
-        self.displayText = displayText ?? Self.computeDisplayText(kind: kind, plainText: plainText, meta: meta)
+        self.displayText = displayText ?? Self.computeDisplayText(kind: kind, plainText: plainText, meta: meta, title: title)
     }
 
     /// 预计算列表行的单行展示文本。
-    public static func computeDisplayText(kind: ClipKind, plainText: String, meta: [String: String]) -> String {
+    public static func computeDisplayText(kind: ClipKind, plainText: String, meta: [String: String], title: String? = nil) -> String {
+        if let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            return title
+        }
         switch kind {
         case .image:
             return meta["display"] ?? "图片"

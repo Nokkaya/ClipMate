@@ -100,6 +100,26 @@ public final class ClipboardMonitor {
                         }
                     }
                 }
+
+                // 链接元数据抓取（标题 + Favicon）：后台异步低优先级任务，失败静默降级
+                if content.kind == .url && self.settings.fetchLinkMetadata && (result.isNew || result.item.title == nil),
+                   let url = URL(string: content.plainText) {
+                    let itemId = result.item.id
+                    Task.detached(priority: .utility) { [weak self] in
+                        guard let self else { return }
+                        let (title, favicon) = await URLMetadataFetcher.fetchMetadata(for: url)
+                        guard title != nil || favicon != nil else { return }
+                        do {
+                            if let updated = try self.store.updateURLMetadata(itemId, title: title, faviconData: favicon) {
+                                DispatchQueue.main.async { [weak self] in
+                                    self?.onItemUpdated?(updated)
+                                }
+                            }
+                        } catch {
+                            NSLog("ClipMate link metadata update failed: \(error)")
+                        }
+                    }
+                }
             } catch {
                 NSLog("ClipMate capture failed: \(error)")
             }

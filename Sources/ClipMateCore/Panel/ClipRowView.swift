@@ -41,6 +41,7 @@ struct ClipRowView: View, Equatable {
         lhs.item.pinned == rhs.item.pinned &&
         lhs.item.useCount == rhs.item.useCount &&
         lhs.item.tags == rhs.item.tags &&
+        lhs.item.title == rhs.item.title &&
         lhs.item.displayText == rhs.item.displayText &&
         lhs.thumbnail === rhs.thumbnail
     }
@@ -49,10 +50,21 @@ struct ClipRowView: View, Equatable {
         HStack(spacing: 10) {
             leading
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.displayText)
-                    .font(.system(size: 13))
-                    .lineLimit(2)
-                    .foregroundStyle(item.kind == .image ? .secondary : .primary)
+                if item.kind == .url, let title = item.title, !title.isEmpty {
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .foregroundStyle(.primary)
+                    Text(item.plainText)
+                        .font(.system(size: 10.5))
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(item.displayText)
+                        .font(.system(size: 13))
+                        .lineLimit(2)
+                        .foregroundStyle(item.kind == .image ? .secondary : .primary)
+                }
                 HStack(spacing: 6) {
                     if !item.sourceName.isEmpty {
                         Text(item.sourceName)
@@ -132,6 +144,13 @@ struct ClipRowView: View, Equatable {
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                 )
+        } else if item.kind == .url, let thumbnail {
+            Image(nsImage: thumbnail)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 18, height: 18)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .frame(width: 22)
         } else {
             Image(systemName: item.kind.systemImage)
                 .font(.system(size: 15))

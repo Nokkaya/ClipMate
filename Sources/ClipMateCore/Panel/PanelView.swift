@@ -26,7 +26,11 @@ struct PanelView: View {
                 ClipList(viewModel: viewModel)
             }
             Divider().overlay(Color.primary.opacity(0.08))
-            FooterBar()
+            if viewModel.multiSelectedIDs.count > 1 {
+                BatchActionBar(viewModel: viewModel)
+            } else {
+                FooterBar()
+            }
         }
         .frame(width: 660, height: 480)
         .background(VisualEffectBackground())
@@ -218,9 +222,19 @@ struct ContextMenuItems: View {
         Button("AI 操作…") { viewModel.openAI(item: item) }
         Divider()
         if viewModel.multiSelectedIDs.count > 1 {
+            Button("合并复制选中的 \(viewModel.multiSelectedIDs.count) 条") {
+                viewModel.copyMulti()
+            }
+            Button("批量固定 / 取消固定") {
+                viewModel.togglePinMulti()
+            }
+            Button("批量加入粘贴队列") {
+                viewModel.enqueueMulti()
+            }
             Button("删除选中的 \(viewModel.multiSelectedIDs.count) 条", role: .destructive) {
                 viewModel.deleteMulti()
             }
+            Divider()
         }
         Button("删除", role: .destructive) { viewModel.delete(item: item) }
     }
@@ -292,3 +306,69 @@ private struct KeyHint: View {
         }
     }
 }
+
+// MARK: - 批量操作栏
+
+struct BatchActionBar: View {
+    @ObservedObject var viewModel: PanelViewModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("已选 \(viewModel.multiSelectedIDs.count) 项")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+
+            Spacer()
+
+            Button {
+                viewModel.copyMulti()
+            } label: {
+                Label("合并复制 (⌘C)", systemImage: "doc.on.doc")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+
+            Button {
+                viewModel.togglePinMulti()
+            } label: {
+                Label("批量固定 (⌘P)", systemImage: "pin")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button {
+                viewModel.enqueueMulti()
+            } label: {
+                Label("加入队列", systemImage: "list.number")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button(role: .destructive) {
+                viewModel.deleteMulti()
+            } label: {
+                Label("批量删除 (⌫)", systemImage: "trash")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button {
+                viewModel.clearMultiSelection()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("取消多选 (Esc)")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(Color.accentColor.opacity(0.12))
+    }
+}
+

@@ -193,7 +193,8 @@ public final class ClipStore {
         var clauses: [String] = []
         var args: [SQLValue] = []
         if !trimmed.isEmpty {
-            clauses.append("plain_text LIKE ?")
+            clauses.append("(plain_text LIKE ? OR title LIKE ?)")
+            args.append(.text("%\(trimmed)%"))
             args.append(.text("%\(trimmed)%"))
         }
         if let clause = filter.kindClause { clauses.append(clause) }
@@ -336,6 +337,32 @@ public final class ClipStore {
             UPDATE clip SET plain_text = ?, tags = ?, meta = ? WHERE id = ?
             """)
         statement.bind([.text(text), .text(json(tags)), .text(json(meta)), .int(id)])
+        try statement.run()
+        return item(id: id)
+    }
+
+    /// 异步抓取到网页元数据（标题、Favicon 图标）后更新条目
+    @discardableResult
+    public func updateURLMetadata(_ id: Int64, title: String?, faviconData: Data?) throws -> ClipItem? {
+        guard let existing = item(id: id) else { return nil }
+        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newTitle = (trimmedTitle?.isEmpty == false) ? trimmedTitle : existing.title
+        let newInlineData = faviconData ?? existing.inlineData
+        guard newTitle != existing.title || faviconData != nil else { return existing }
+
+        var meta = existing.meta
+        if newTitle != nil { meta["link_title"] = "1" }
+        if newInlineData != nil { meta["link_favicon"] = "1" }
+
+        let statement = try db.prepare("""
+            UPDATE clip SET title = ?, inline_data = ?, meta = ? WHERE id = ?
+            """)
+        statement.bind([
+            .text(newTitle),
+            .blob(newInlineData),
+            .text(json(meta)),
+            .int(id)
+        ])
         try statement.run()
         return item(id: id)
     }

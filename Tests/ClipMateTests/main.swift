@@ -579,6 +579,115 @@ runner.run("ImageHelper 缩略图自适应压缩（Alpha PNG 与无 Alpha JPEG�
     runner.expectTrue(isJPEG, "无 Alpha 通道图片自适应采用 JPEG 压缩")
 }
 
+runner.run("URLMetadataFetcher HTML Title 提取与实体解码") {
+    let sampleHTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title> GitHub: Let&#39;s build from here &amp; innovate &mdash; 领先平台 </title>
+        <link rel="icon" type="image/png" href="/assets/favicon.png">
+    </head>
+    <body><h1>Hello</h1></body>
+    </html>
+    """
+    let title = URLMetadataFetcher.extractTitle(from: sampleHTML)
+    runner.expectEqual(title, "GitHub: Let's build from here & innovate — 领先平台", "Title 提取并正确反转义 HTML 实体")
+
+    let baseURL = URL(string: "https://github.com/features")!
+    let iconURL = URLMetadataFetcher.extractIconURL(from: sampleHTML, baseURL: baseURL)
+    runner.expectEqual(iconURL?.absoluteString, "https://github.com/assets/favicon.png", "Favicon 相对路径正确解析为完整 URL")
+}
+
+runner.run("SyntaxHighlighter JSON 与代码语法高亮") {
+    let rawJSON = "{\"name\":\"ClipMate\",\"version\":1,\"active\":true,\"data\":null}"
+    let formatted = SyntaxHighlighter.formatJSON(rawJSON)
+    runner.expectTrue(formatted != nil, "JSON 成功格式化")
+    runner.expectTrue(formatted?.contains("\n") == true, "格式化 JSON 包含换行缩进")
+
+    let highlightedJSON = SyntaxHighlighter.highlightJSON(rawJSON)
+    runner.expectTrue(highlightedJSON != nil, "JSON 高亮成功")
+    runner.expectTrue(highlightedJSON!.attributed.characters.count > 0, "输出 AttributedString")
+
+    let sampleCode = """
+    // 计算斐波那契数列
+    func fibonacci(_ n: Int) -> Int {
+        let name = "test"
+        if n <= 1 { return n }
+        return fibonacci(n - 1) + fibonacci(n - 2)
+    }
+    """
+    let codeAttr = SyntaxHighlighter.highlightCode(sampleCode)
+    runner.expectTrue(codeAttr.characters.count > 0, "代码语法高亮成功生成 AttributedString")
+}
+
+runner.run("ClipStore 链接元数据持久化与搜索联动") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let captured = try store.capture(
+        kind: .url,
+        plainText: "https://swift.org/blog",
+        sourceBundle: "com.apple.Safari",
+        sourceName: "Safari"
+    )
+
+    let dummyFavicon = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    let updated = try store.updateURLMetadata(
+        captured.item.id,
+        title: "Swift 官方博客 · Swift.org",
+        faviconData: dummyFavicon
+    )
+    runner.expectTrue(updated != nil, "更新 URL 元数据成功")
+    runner.expectEqual(updated?.title, "Swift 官方博客 · Swift.org", "Title 字段持久化成功")
+
+    let storedInline = store.inlineData(for: captured.item.id)
+    runner.expectEqual(storedInline, dummyFavicon, "Favicon 正确写入 inlineData")
+
+    // 按标题检索命中
+    let titleSearch = store.search(query: "官方博客", filter: .link, limit: 10)
+    runner.expectEqual(titleSearch.count, 1, "按网页标题搜索成功命中链接条目")
+}
+
+runner.run("PanelViewModel 批量全选、合并复制与批量固定") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    _ = try store.capture(kind: .text, plainText: "First line", sourceBundle: "app", sourceName: "App")
+    _ = try store.capture(kind: .text, plainText: "Second line", sourceBundle: "app", sourceName: "App")
+    _ = try store.capture(kind: .text, plainText: "Third line", sourceBundle: "app", sourceName: "App")
+
+    let settings = AppSettings()
+    let monitor = ClipboardMonitor(settings: settings, store: store)
+    let front = FrontAppTracker()
+    let ai = AIService(settings: settings)
+    let vm = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: front, ai: ai)
+
+    vm.reload()
+    runner.expectEqual(vm.items.count, 3, "初始 3 条记录")
+
+    // 全选
+    vm.selectAllVisible()
+    runner.expectEqual(vm.multiSelectedIDs.count, 3, "全选成功选中全部 3 项")
+
+    // 批量固定
+    vm.togglePinMulti()
+    runner.expectTrue(vm.items.allSatisfy { $0.pinned }, "批量固定成功，所有项均已置顶固定")
+
+    // 批量取消固定
+    vm.togglePinMulti()
+    runner.expectTrue(vm.items.allSatisfy { !$0.pinned }, "再次批量固定成功取消固定")
+
+    // 批量入队
+    vm.enqueueMulti()
+    runner.expectEqual(vm.queue.count, 3, "批量加入粘贴队列成功")
+
+    // 批量合并复制
+    vm.copyMulti(separator: "\n---\n")
+    let pbString = NSPasteboard.general.string(forType: .string)
+    runner.expectTrue(pbString?.contains("---\n") == true, "批量合并复制成功写入剪贴板")
+}
+
 print("----")
 if runner.failures.isEmpty {
     print("全部 \(runner.passed) 个用例通过 ✅")
