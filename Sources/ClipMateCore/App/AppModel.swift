@@ -31,13 +31,14 @@ final class AppModel {
         let embeddingProvider: ((String) -> Data?)? = settings.semanticSearchEnabled && EmbeddingService.isAvailable
             ? { EmbeddingService.embed(text: $0) }
             : nil
-        store = try ClipStore(database: database, blobStore: blobStore, embeddingProvider: embeddingProvider)
+        let mainStore = try ClipStore(database: database, blobStore: blobStore, embeddingProvider: embeddingProvider)
+        store = mainStore
         if embeddingProvider != nil {
             // 补算使用独立数据库连接：WAL 多连接下后台写入不阻塞主线程查询
             let backfillDatabase = try Database(url: base.appendingPathComponent("clipmate.sqlite"))
             let backfillStore = try ClipStore(database: backfillDatabase, blobStore: blobStore)
-            embeddingBackfill = EmbeddingBackfill(store: backfillStore) { [weak self] in
-                self?.store.invalidateEmbeddingCache()
+            embeddingBackfill = EmbeddingBackfill(store: backfillStore) { [weak mainStore] in
+                mainStore?.invalidateEmbeddingCache()
             }
         } else {
             embeddingBackfill = nil
