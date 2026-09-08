@@ -217,9 +217,11 @@ struct ClipList: View {
                             item: item,
                             selected: item.id == viewModel.selectedID,
                             multiSelected: viewModel.multiSelectedIDs.contains(item.id),
-                            thumbnail: viewModel.thumbnail(for: item)
+                            thumbnail: viewModel.thumbnail(for: item),
+                            searchHighlight: viewModel.query
                         )
                         .equatable()
+
                         .id(item.id)
                         .onTapGesture {
                             let now = ProcessInfo.processInfo.systemUptime

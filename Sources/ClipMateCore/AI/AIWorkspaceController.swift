@@ -158,13 +158,13 @@ final class AIWorkspaceModel: ObservableObject {
 
         // 构造消息列表：System + 原文上下文 + 历史轮次 + 当前问题
         var messages: [[String: String]] = [
-            ["role": "system", "content": "你是 macOS 剪贴板 AI 助手。请基于剪贴板内容提供专业、简明、准确的回答。"]
+            ["role": "system", "content": "你是 macOS 剪贴板 AI 助手。请基于剪贴板内容提供专业、简明、准确的回答，支持格式清晰的 Markdown 与代码块。"]
         ]
         messages.append([
             "role": "user",
-            "content": "剪贴板原文如下：\n```\n\(String(item.plainText.prefix(6000)))\n```"
+            "content": "剪贴板原文上下文如下：\n```\n\(String(item.plainText.prefix(6000)))\n```"
         ])
-        for msg in chatHistory {
+        for msg in chatHistory where !msg.content.isEmpty {
             messages.append(["role": msg.role, "content": msg.content])
         }
         messages.append(["role": "user", "content": trimmed])
@@ -193,7 +193,24 @@ final class AIWorkspaceModel: ObservableObject {
         }
     }
 
+    func clearChat() {
+        cancel()
+        chatHistory = []
+        output = ""
+        errorText = nil
+        finished = false
+        HapticHelper.alignment()
+    }
+
+    func copyMessage(_ content: String) {
+        guard !content.isEmpty else { return }
+        PasteBack.write(.text(content))
+        monitor.suppress(seconds: 1.5)
+        HapticHelper.feedback()
+    }
+
     func runScript(_ script: ScriptAction) {
+
         guard let item = beginRun() else { return }
         task = Task { @MainActor [weak self] in
             guard let self else { return }

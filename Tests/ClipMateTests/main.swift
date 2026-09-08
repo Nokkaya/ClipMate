@@ -908,7 +908,61 @@ runner.run("ClipStore 智能标题入库与更新") {
     runner.expectEqual(updated?.title, "发票号码: 12345678", "updateOCR 成功更新条目标题")
 }
 
+runner.run("TextHighlighter 关键词匹配与 AttributedString 高亮") {
+
+    let source = "ClipMate 是一款轻量级的剪贴板历史工具，性能极高。"
+
+    // 1. 空搜索词
+    let emptyAttr = TextHighlighter.highlight(text: source, query: "")
+    runner.expectEqual(String(emptyAttr.characters), source, "空搜索词保持原文字符一致")
+
+    // 2. 单关键词高亮
+    let singleAttr = TextHighlighter.highlight(text: source, query: "剪贴板")
+    runner.expectEqual(String(singleAttr.characters), source, "文本内容保持一致")
+    var hasHighlight = false
+    for run in singleAttr.runs {
+        if run.backgroundColor != nil {
+            hasHighlight = true
+            break
+        }
+    }
+    runner.expectTrue(hasHighlight, "成功生成带背景高亮属性的 Run")
+
+    // 3. 大小写不敏感匹配
+    let caseAttr = TextHighlighter.highlight(text: "Hello clipmate world", query: "CLIPMATE")
+    var caseHighlighted = false
+    for run in caseAttr.runs {
+        if run.backgroundColor != nil {
+            caseHighlighted = true
+            break
+        }
+    }
+    runner.expectTrue(caseHighlighted, "大小写不敏感正确命中高亮")
+
+    // 4. 多处重复命中
+    let multiSource = "test alpha test beta test"
+    let multiAttr = TextHighlighter.highlight(text: multiSource, query: "test")
+    var highlightCount = 0
+    for run in multiAttr.runs {
+        if run.backgroundColor != nil {
+            highlightCount += 1
+        }
+    }
+    runner.expectTrue(highlightCount >= 3, "成功高亮全部 3 处匹配关键字")
+}
+
+runner.run("AIChatMessage 消息数据模型与结构验证") {
+    let msg1 = AIChatMessage(role: "user", content: "这段代码有死锁风险吗？")
+    runner.expectEqual(msg1.role, "user", "角色记录正确")
+    runner.expectEqual(msg1.content, "这段代码有死锁风险吗？", "内容记录正确")
+
+    let msg2 = AIChatMessage(role: "assistant", content: "经分析，在第 12 行存在锁未释放风险。")
+    runner.expectEqual(msg2.role, "assistant", "AI 角色记录正确")
+    runner.expectFalse(msg1.id == msg2.id, "每个消息具备唯一 UUID")
+}
+
 print("----")
+
 
 if runner.failures.isEmpty {
     print("全部 \(runner.passed) 个用例通过 ✅")

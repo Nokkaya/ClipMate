@@ -68,9 +68,17 @@ struct PreviewOverlay: View {
                 .background(RoundedRectangle(cornerRadius: 7).fill(item.kind.tintColor.opacity(0.14)))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title?.isEmpty == false ? item.title! : item.displayText)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .lineLimit(1)
+                let headerText = item.title?.isEmpty == false ? item.title! : item.displayText
+                if !viewModel.query.isEmpty {
+                    Text(TextHighlighter.highlight(text: headerText, query: viewModel.query))
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .lineLimit(1)
+                } else {
+                    Text(headerText)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .lineLimit(1)
+                }
+
 
                 HStack(spacing: 6) {
                     Text(item.kind.title)
@@ -192,11 +200,19 @@ struct PreviewOverlay: View {
                         .font(.system(size: 10.5))
                     }
                     ScrollView {
-                        Text(item.plainText)
-                            .font(.system(size: 11.5))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+                        if !viewModel.query.isEmpty {
+                            Text(TextHighlighter.highlight(text: item.plainText, query: viewModel.query))
+                                .font(.system(size: 11.5))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        } else {
+                            Text(item.plainText)
+                                .font(.system(size: 11.5))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
                     }
+
                     .frame(maxHeight: 55)
                     .modernScrollbar()
                 }
@@ -497,11 +513,19 @@ struct PreviewOverlay: View {
             }
 
             ScrollView {
-                Text(item.plainText)
-                    .font(.system(size: 12, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                if !viewModel.query.isEmpty {
+                    Text(TextHighlighter.highlight(text: item.plainText, query: viewModel.query))
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                } else {
+                    Text(item.plainText)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
             }
+
             .frame(maxHeight: 185)
             .modernScrollbar()
             .padding(8)

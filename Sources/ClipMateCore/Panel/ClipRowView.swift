@@ -32,12 +32,14 @@ struct ClipRowView: View, Equatable {
     let selected: Bool
     var multiSelected: Bool = false
     let thumbnail: NSImage?
+    var searchHighlight: String = ""
     @State private var hovered = false
 
     static func == (lhs: ClipRowView, rhs: ClipRowView) -> Bool {
         lhs.item.id == rhs.item.id &&
         lhs.selected == rhs.selected &&
         lhs.multiSelected == rhs.multiSelected &&
+        lhs.searchHighlight == rhs.searchHighlight &&
         lhs.item.pinned == rhs.item.pinned &&
         lhs.item.useCount == rhs.item.useCount &&
         lhs.item.tags == rhs.item.tags &&
@@ -52,27 +54,49 @@ struct ClipRowView: View, Equatable {
             leading
             VStack(alignment: .leading, spacing: 2) {
                 if let title = item.title, !title.isEmpty {
-                    Text(title)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                        .foregroundStyle(.primary)
+                    if !searchHighlight.isEmpty {
+                        Text(TextHighlighter.highlight(text: title, query: searchHighlight))
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                            .foregroundStyle(.primary)
+                    } else {
+                        Text(title)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                            .foregroundStyle(.primary)
+                    }
                     let subtitleText: String = {
                         if item.kind == .url { return item.plainText }
                         if item.kind == .image { return item.meta["display"] ?? item.plainText }
                         return item.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
                     }()
                     if !subtitleText.isEmpty && subtitleText != title {
-                        Text(subtitleText)
-                            .font(.system(size: 10.5))
-                            .lineLimit(1)
-                            .foregroundStyle(.secondary)
+                        if !searchHighlight.isEmpty {
+                            Text(TextHighlighter.highlight(text: subtitleText, query: searchHighlight))
+                                .font(.system(size: 10.5))
+                                .lineLimit(1)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(subtitleText)
+                                .font(.system(size: 10.5))
+                                .lineLimit(1)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } else {
-                    Text(item.displayText)
-                        .font(.system(size: 13))
-                        .lineLimit(2)
-                        .foregroundStyle(item.kind == .image ? .secondary : .primary)
+                    if !searchHighlight.isEmpty {
+                        Text(TextHighlighter.highlight(text: item.displayText, query: searchHighlight))
+                            .font(.system(size: 13))
+                            .lineLimit(2)
+                            .foregroundStyle(item.kind == .image ? .secondary : .primary)
+                    } else {
+                        Text(item.displayText)
+                            .font(.system(size: 13))
+                            .lineLimit(2)
+                            .foregroundStyle(item.kind == .image ? .secondary : .primary)
+                    }
                 }
+
 
                 HStack(spacing: 6) {
                     if !item.sourceName.isEmpty {
