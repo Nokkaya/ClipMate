@@ -82,14 +82,18 @@ public struct PromptTemplate: Codable, Identifiable, Equatable, Sendable {
     public static let defaults: [PromptTemplate] = [
         PromptTemplate(id: "translate", name: "中英互译", icon: "globe",
                        template: "请将以下内容翻译为自然流畅的简体中文；若原文已经是中文，则翻译为地道英文。直接输出译文，不要多余解释：\n\n{content}"),
+        PromptTemplate(id: "summary", name: "精简摘要", icon: "doc.text",
+                       template: "请对以下内容提取关键信息并做精简摘要，保持客观，直接输出精炼摘要：\n\n{content}"),
         PromptTemplate(id: "summarize", name: "提取要点", icon: "list.bullet",
                        template: "请提炼以下内容的核心关键信息，以清晰精炼的项目符号清单输出：\n\n{content}"),
         PromptTemplate(id: "explainCode", name: "解释代码", icon: "curlybraces",
                        template: "请作为资深软件工程师，简明扼要地解释以下代码/命令的核心逻辑、作用和注意事项：\n\n{content}"),
-        PromptTemplate(id: "unitTest", name: "生成单测", icon: "checkmark.seal",
-                       template: "请为以下代码编写覆盖边界用例与异常的高质量单元测试：\n\n{content}"),
+        PromptTemplate(id: "grammar", name: "修正语法", icon: "checkmark.circle",
+                       template: "请修正以下内容中的拼写、标点和语法错误，保持原意和语言风格，直接输出修正后的结果：\n\n{content}"),
         PromptTemplate(id: "rewrite", name: "专业润色", icon: "wand.and.stars",
                        template: "请把以下内容改写得更专业、通顺且精炼，保持原意，直接输出润色结果：\n\n{content}"),
+        PromptTemplate(id: "unitTest", name: "生成单测", icon: "checkmark.seal",
+                       template: "请为以下代码编写覆盖边界用例与异常的高质量单元测试：\n\n{content}"),
         PromptTemplate(id: "jsonToTS", name: "JSON转TS", icon: "arrow.triangle.2.circlepath",
                        template: "请将以下 JSON 数据结构精确转换为严格规范的 TypeScript interface / type 定义：\n\n{content}")
     ]

@@ -26,7 +26,7 @@ struct AIWorkspaceView: View {
             footer
         }
         .padding(20)
-        .frame(width: 620, height: 720) // 窗口留边，阴影在窗口内绘制
+        .frame(width: 660, height: 720) // 窗口留边，阴影在窗口内绘制
         .background(VisualEffectBackground())
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -127,49 +127,50 @@ struct AIWorkspaceView: View {
     // MARK: - 快捷操作芯片栏
 
     private var actionChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(AIAction.allCases) { action in
-                    Button {
-                        model.runAI(action)
-                    } label: {
-                        Label(action.title, systemImage: action.systemImage)
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isRunning || model.item == nil)
+        FlowLayout(spacing: 6, rowSpacing: 6) {
+            ForEach(allTemplates) { template in
+                Button {
+                    model.runTemplate(template)
+                } label: {
+                    Label(template.name, systemImage: template.icon)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3.5)
                 }
-
-                ForEach(model.promptTemplates) { template in
-                    Button {
-                        model.runTemplate(template)
-                    } label: {
-                        Label(template.name, systemImage: template.icon)
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isRunning || model.item == nil)
-                }
-
-                ForEach(model.scriptList) { script in
-                    Button {
-                        model.runScript(script)
-                    } label: {
-                        Label(script.name, systemImage: "terminal")
-                            .font(.system(size: 11))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isRunning || model.item == nil)
-                }
+                .buttonStyle(.bordered)
+                .disabled(model.isRunning || model.item == nil)
             }
-            .padding(.vertical, 2)
+
+            ForEach(model.scriptList) { script in
+                Button {
+                    model.runScript(script)
+                } label: {
+                    Label(script.name, systemImage: "terminal")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3.5)
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isRunning || model.item == nil)
+            }
         }
+        .padding(.vertical, 2)
+    }
+
+    /// 统一合并并去重后的提示词模板库，保证所有功能均完整可见且不重复
+    private var allTemplates: [PromptTemplate] {
+        var list = model.promptTemplates
+        if list.isEmpty {
+            list = PromptTemplate.defaults
+        }
+        let existingIDs = Set(list.map { $0.id })
+        let existingNames = Set(list.map { $0.name })
+        for def in PromptTemplate.defaults {
+            if !existingIDs.contains(def.id) && !existingNames.contains(def.name) {
+                list.append(def)
+            }
+        }
+        return list
     }
 
     // MARK: - 多轮对话问答流

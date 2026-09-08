@@ -961,6 +961,24 @@ runner.run("AIChatMessage 消息数据模型与结构验证") {
     runner.expectFalse(msg1.id == msg2.id, "每个消息具备唯一 UUID")
 }
 
+runner.run("FlowLayout 布局初始化与精选提示词模板库覆盖") {
+    let flow = FlowLayout(spacing: 8, rowSpacing: 10)
+    runner.expectEqual(flow.spacing, 8, "水平间距记录正确")
+    runner.expectEqual(flow.rowSpacing, 10, "行间距记录正确")
+
+    // 验证 PromptTemplate.defaults 包含全部高频预置指令，无重复
+    let ids = PromptTemplate.defaults.map { $0.id }
+    runner.expectTrue(ids.contains("translate"), "包含中英互译")
+    runner.expectTrue(ids.contains("summary"), "包含精简摘要")
+    runner.expectTrue(ids.contains("summarize"), "包含提取要点")
+    runner.expectTrue(ids.contains("explainCode"), "包含解释代码")
+    runner.expectTrue(ids.contains("grammar"), "包含修正语法")
+    runner.expectTrue(ids.contains("rewrite"), "包含专业润色")
+    runner.expectTrue(ids.contains("unitTest"), "包含生成单测")
+    runner.expectTrue(ids.contains("jsonToTS"), "包含JSON转TS")
+    runner.expectEqual(Set(ids).count, PromptTemplate.defaults.count, "预置模板 ID 全局唯一，无冗余重复")
+}
+
 print("----")
 
 

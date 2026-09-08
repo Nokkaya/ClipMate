@@ -287,7 +287,7 @@ final class AIWorkspaceController {
     init(ai: AIService, store: ClipStore, monitor: ClipboardMonitor, settings: AppSettings) {
         model = AIWorkspaceModel(ai: ai, store: store, monitor: monitor, settings: settings)
         panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 660, height: 720),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -353,7 +353,8 @@ final class AIWorkspaceController {
     private func position() {
         // 记忆位置优先（且必须在当前屏幕范围内）
         if let saved = savedFrame() {
-            panel.setFrame(saved, display: true)
+            let targetSize = NSSize(width: max(saved.width, 660), height: max(saved.height, 720))
+            panel.setFrame(NSRect(origin: saved.origin, size: targetSize), display: true)
             return
         }
         let size = panel.frame.size
