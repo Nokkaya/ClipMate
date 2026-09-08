@@ -979,6 +979,49 @@ runner.run("FlowLayout 布局初始化与精选提示词模板库覆盖") {
     runner.expectEqual(Set(ids).count, PromptTemplate.defaults.count, "预置模板 ID 全局唯一，无冗余重复")
 }
 
+runner.run("PanelViewModel 内置 AI 侧边栏展开与实时选择联动") {
+    let (store, tempDir) = try! makeTempStore()
+    let settings = AppSettings()
+    let monitor = ClipboardMonitor(settings: settings, store: store)
+    let frontApps = FrontAppTracker()
+    let ai = AIService(settings: settings)
+    let vm = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: frontApps, ai: ai)
+
+    // 写入测试条目（降序排列：item2 在首位，item1 在次位）
+    let (item1, _) = try! store.capture(kind: .text, plainText: "条目一：测试文本 A", sourceBundle: "test", sourceName: "test")
+    let (item2, _) = try! store.capture(kind: .text, plainText: "条目二：测试文本 B", sourceBundle: "test", sourceName: "test")
+    vm.reload()
+
+    // 默认侧边栏为收起状态
+    runner.expectFalse(vm.isAISidebarOpen, "默认 AI 侧边栏为收起状态")
+
+    // 切换打开侧边栏
+    var toggleCallbackCalled = false
+    vm.onAISidebarToggled = { isOpen in
+        toggleCallbackCalled = isOpen
+    }
+    vm.toggleAISidebar()
+    runner.expectTrue(vm.isAISidebarOpen, "toggle 成功展开侧边栏")
+    runner.expectTrue(toggleCallbackCalled, "触发 onAISidebarToggled 回调")
+    runner.expectEqual(vm.aiModel.item?.id, item2.id, "展开时 AI 模型实时绑定当前首项")
+
+    // 上下移动切换选中项，验证 AI 模型实时同步更新
+    vm.moveSelection(1)
+    runner.expectEqual(vm.selectedIndex, 1, "选中项切换为第二条")
+    runner.expectEqual(vm.aiModel.item?.id, item1.id, "上下方向键移动时 AI 模型实时同步选中条目")
+
+    // 再次切换关闭侧边栏
+    vm.toggleAISidebar()
+    runner.expectFalse(vm.isAISidebarOpen, "再次 toggle 成功收起侧边栏")
+
+    // openAI 方法就地展开并锁定目标
+    vm.openAI(item: item1)
+    runner.expectTrue(vm.isAISidebarOpen, "openAI 展开侧边栏")
+    runner.expectEqual(vm.aiModel.item?.id, item1.id, "openAI 准确定位目标条目")
+
+    try? FileManager.default.removeItem(at: tempDir)
+}
+
 print("----")
 
 

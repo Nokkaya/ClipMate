@@ -32,7 +32,7 @@ final class PanelController {
         self.frontApps = frontApps
         viewModel = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: frontApps, ai: ai)
         panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 540),
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 580),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -41,7 +41,7 @@ final class PanelController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         // 系统窗口阴影在透明窗口上每次内容变化都要整体重算（卡顿源之一），
-        // 改由 SwiftUI 在窗口内绘制阴影（见 PanelView 的 720×540 边距设计）。
+        // 改由 SwiftUI 在窗口内绘制阴影（见 PanelView 的边距设计）。
         panel.hasShadow = false
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
@@ -50,6 +50,9 @@ final class PanelController {
 
         viewModel.dismiss = { [weak self] in self?.hidePanel() }
         viewModel.openSettings = { [weak self] in self?.onOpenSettings?() }
+        viewModel.onAISidebarToggled = { [weak self] isOpen in
+            self?.updatePanelFrame(forSidebarOpen: isOpen, animated: true)
+        }
 
         let hosting = AutoConfiguringHostingView(rootView: PanelView(viewModel: viewModel))
         hosting.autoresizingMask = [.width, .height]
@@ -91,6 +94,11 @@ final class PanelController {
             viewModel.pasteTarget = current
         }
         viewModel.reload()
+        let targetWidth: CGFloat = viewModel.isAISidebarOpen ? 940 : 500
+        let targetHeight: CGFloat = 580
+        var currentFrame = panel.frame
+        currentFrame.size = NSSize(width: targetWidth, height: targetHeight)
+        panel.setFrame(currentFrame, display: false)
         positionPanel()
         if let contentView = panel.contentView {
             ModernScrollViewConfigurator.configureAllScrollViews(in: contentView)
@@ -170,6 +178,33 @@ final class PanelController {
     }
 
 
+    /// 当 AI 侧边栏展开/收起时平滑变更窗口尺寸
+    func updatePanelFrame(forSidebarOpen isOpen: Bool, animated: Bool = true) {
+        let targetWidth: CGFloat = isOpen ? 940 : 500
+        let targetHeight: CGFloat = 580
+        var frame = panel.frame
+        let widthDelta = targetWidth - frame.width
+        if abs(widthDelta) < 1 { return }
+
+        guard panel.isVisible else {
+            frame.size = NSSize(width: targetWidth, height: targetHeight)
+            panel.setFrame(frame, display: true)
+            return
+        }
+
+        var newX = frame.origin.x
+        let newY = frame.origin.y
+        if let screen = panel.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            if newX + targetWidth > visible.maxX - 8 {
+                newX = max(visible.minX + 8, visible.maxX - targetWidth - 8)
+            }
+        }
+
+        let newFrame = NSRect(x: newX, y: newY, width: targetWidth, height: targetHeight)
+        panel.setFrame(newFrame, display: true, animate: animated)
+    }
+
     // MARK: - 键盘（键盘优先交互的核心）
 
     private func installKeyMonitor() {
@@ -191,6 +226,8 @@ final class PanelController {
     private func handleKey(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let cmdOnly = flags.contains(.command)
+            && !flags.contains(.option) && !flags.contains(.control) && !flags.contains(.shift)
+        let cmdShiftOnly = flags.contains(.command) && flags.contains(.shift)
             && !flags.contains(.option) && !flags.contains(.control)
 
         // 编辑浮层：除 Esc 外放行给 TextEditor
@@ -254,11 +291,13 @@ final class PanelController {
                 return true
             }
             return false
-        case 53: // Esc：清多选 → 预览 → 清搜索词 → 隐藏
+        case 53: // Esc：清多选 → 预览 → 收起 AI 侧边栏 → 清搜索词 → 隐藏
             if viewModel.multiSelectedIDs.count > 0 {
                 viewModel.clearMultiSelection()
             } else if viewModel.previewItem != nil {
                 viewModel.previewItem = nil
+            } else if viewModel.isAISidebarOpen {
+                viewModel.toggleAISidebar()
             } else if !viewModel.query.isEmpty {
                 viewModel.query = ""
                 viewModel.reload()
@@ -275,6 +314,9 @@ final class PanelController {
                 return true
             }
             return false
+        case 0 where cmdShiftOnly: // ⌘⇧A 切换 AI 侧边栏
+            viewModel.toggleAISidebar()
+            return true
         case 8 where cmdOnly: // ⌘C 复制 / 合并复制
             if viewModel.multiSelectedIDs.count > 1 {
                 viewModel.copyMulti()
@@ -294,8 +336,8 @@ final class PanelController {
         case 34 where cmdOnly: // ⌘I 详情预览
             viewModel.togglePreview()
             return true
-        case 40 where cmdOnly: // ⌘K AI
-            viewModel.openAI()
+        case 40 where cmdOnly: // ⌘K 切换 AI 侧边栏
+            viewModel.toggleAISidebar()
             return true
         default:
             if cmdOnly, let chars = event.charactersIgnoringModifiers,

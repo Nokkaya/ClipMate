@@ -6,12 +6,26 @@ public final class PanelViewModel: ObservableObject {
     @Published public var query = ""
     @Published public var filter: FilterKind = .all
     @Published public var items: [ClipItem] = []
-    @Published public var selectedIndex = 0
+    @Published public var selectedIndex = 0 {
+        didSet {
+            if items.indices.contains(selectedIndex) {
+                selectedID = items[selectedIndex].id
+            }
+            syncAITargetIfNeeded()
+        }
+    }
     /// 选中锚点：以条目 id 记录，列表重排（新采集置顶等）后选中不漂移。
     @Published public var selectedID: Int64?
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
+
+    /// 是否展开内置 AI 问答侧边栏
+    @Published public var isAISidebarOpen = false
+    /// 内置 AI 侧边栏专属状态模型
+    public let aiModel: AIWorkspaceModel
+    /// 侧边栏展开/收起回调（驱动窗口平滑改变宽度）
+    public var onAISidebarToggled: ((Bool) -> Void)?
 
     // 片段专用管理状态
     @Published public var showSnippetOverlay = false
@@ -54,6 +68,9 @@ public final class PanelViewModel: ObservableObject {
         self.monitor = monitor
         self.frontApps = frontApps
         self.ai = ai
+        self.aiModel = AIWorkspaceModel(ai: ai, store: store, monitor: monitor, settings: settings)
+        self.aiModel.pasteTargetProvider = { [weak self] in self?.pasteTarget }
+        self.aiModel.hidePanel = { [weak self] in self?.dismiss?() }
     }
 
     // MARK: - 数据
@@ -123,6 +140,7 @@ public final class PanelViewModel: ObservableObject {
         // 多选只对当前可见列表有意义，清理失效引用
         let visibleIDs = Set(items.map(\.id))
         multiSelectedIDs.formIntersection(visibleIDs)
+        syncAITargetIfNeeded()
     }
 
     public func handleCaptured(_ item: ClipItem) {
@@ -142,8 +160,8 @@ public final class PanelViewModel: ObservableObject {
     public func moveSelection(_ delta: Int) {
         guard !items.isEmpty else { return }
         let nextIndex = min(max(0, selectedIndex + delta), items.count - 1)
-        selectedIndex = nextIndex
         selectedID = items[nextIndex].id
+        selectedIndex = nextIndex
     }
 
     public func cycleFilter() {
@@ -469,13 +487,42 @@ public final class PanelViewModel: ObservableObject {
         previewItem = nil
     }
 
-    // MARK: - AI 工作台（独立悬浮窗口，不覆盖主面板）
+    // MARK: - AI 侧边栏与问答联动
 
+    /// 实时同步当前选中项至 AI 模型上下文
+    public func syncAITargetIfNeeded() {
+        guard isAISidebarOpen, let item = selectedItem else { return }
+        if aiModel.item?.id != item.id {
+            aiModel.load(item: item)
+        }
+    }
+
+    /// 切换 AI 侧边栏展开/收起
+    public func toggleAISidebar() {
+        isAISidebarOpen.toggle()
+        if isAISidebarOpen, let item = selectedItem {
+            if aiModel.item?.id != item.id {
+                aiModel.load(item: item)
+            }
+        }
+        onAISidebarToggled?(isAISidebarOpen)
+        HapticHelper.feedback()
+    }
+
+    /// 就地展开 AI 侧边栏并聚焦当前选中条目
     public func openAI(item: ClipItem? = nil) {
         let target = item ?? selectedItem
-        guard let target else { return }
-        if let index = items.firstIndex(where: { $0.id == target.id }) { selectedIndex = index }
-        aiWorkspace?.openOrFocus(item: target)
+        if let target, let index = items.firstIndex(where: { $0.id == target.id }) {
+            selectedIndex = index
+        }
+        if !isAISidebarOpen {
+            isAISidebarOpen = true
+            onAISidebarToggled?(true)
+        }
+        if let target {
+            aiModel.load(item: target)
+        }
+        HapticHelper.feedback()
     }
 
     // MARK: - 缩略图

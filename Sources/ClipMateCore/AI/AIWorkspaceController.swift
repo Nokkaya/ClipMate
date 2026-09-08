@@ -13,41 +13,41 @@ public struct AIChatMessage: Identifiable, Equatable {
     }
 }
 
-/// AI 工作台状态（独立于主面板的窗口）。
-final class AIWorkspaceModel: ObservableObject {
-    @Published var item: ClipItem?
-    @Published var output = ""
-    @Published var chatHistory: [AIChatMessage] = []
-    @Published var isRunning = false
-    @Published var finished = false
-    @Published var errorText: String?
-    @Published var customPrompt = ""
+/// AI 工作台状态（可作为主面板侧边栏或独立窗口运行）。
+public final class AIWorkspaceModel: ObservableObject {
+    @Published public var item: ClipItem?
+    @Published public var output = ""
+    @Published public var chatHistory: [AIChatMessage] = []
+    @Published public var isRunning = false
+    @Published public var finished = false
+    @Published public var errorText: String?
+    @Published public var customPrompt = ""
 
-    let ai: AIService
-    let store: ClipStore
-    let monitor: ClipboardMonitor
-    let settings: AppSettings
+    public let ai: AIService
+    public let store: ClipStore
+    public let monitor: ClipboardMonitor
+    public let settings: AppSettings
 
-    var pasteTargetProvider: (() -> NSRunningApplication?)?
-    var hidePanel: (() -> Void)?
+    public var pasteTargetProvider: (() -> NSRunningApplication?)?
+    public var hidePanel: (() -> Void)?
     private var task: Task<Void, Never>?
 
-    init(ai: AIService, store: ClipStore, monitor: ClipboardMonitor, settings: AppSettings) {
+    public init(ai: AIService, store: ClipStore, monitor: ClipboardMonitor, settings: AppSettings) {
         self.ai = ai
         self.store = store
         self.monitor = monitor
         self.settings = settings
     }
 
-    var scriptList: [ScriptAction] { settings.customScripts }
-    var promptTemplates: [PromptTemplate] { settings.customPrompts }
+    public var scriptList: [ScriptAction] { settings.customScripts }
+    public var promptTemplates: [PromptTemplate] { settings.customPrompts }
 
-    var statusText: String {
+    public var statusText: String {
         ai.isConfigured ? "OpenAI 兼容端点" : "未配置（设置 → AI）"
     }
 
     /// 打开/切换条目：重置结果区与会话，保留自定义指令。
-    func load(item: ClipItem) {
+    public func load(item: ClipItem) {
         cancel()
         self.item = item
         output = ""
@@ -80,7 +80,7 @@ final class AIWorkspaceModel: ObservableObject {
     }
 
     /// 执行内置动作
-    func runAI(_ action: AIAction) {
+    public func runAI(_ action: AIAction) {
         guard let item = beginRun() else { return }
         guard ai.isConfigured else {
             isRunning = false
@@ -115,7 +115,7 @@ final class AIWorkspaceModel: ObservableObject {
     }
 
     /// 执行自定义提示词模板
-    func runTemplate(_ template: PromptTemplate) {
+    public func runTemplate(_ template: PromptTemplate) {
         guard let item = beginRun() else { return }
         guard ai.isConfigured else {
             isRunning = false
@@ -147,7 +147,7 @@ final class AIWorkspaceModel: ObservableObject {
     }
 
     /// “问剪贴板”：多轮连续对话追问
-    func askQuestion(_ question: String) {
+    public func askQuestion(_ question: String) {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let item = beginRun() else { return }
         guard ai.isConfigured else {
@@ -193,7 +193,7 @@ final class AIWorkspaceModel: ObservableObject {
         }
     }
 
-    func clearChat() {
+    public func clearChat() {
         cancel()
         chatHistory = []
         output = ""
@@ -202,14 +202,14 @@ final class AIWorkspaceModel: ObservableObject {
         HapticHelper.alignment()
     }
 
-    func copyMessage(_ content: String) {
+    public func copyMessage(_ content: String) {
         guard !content.isEmpty else { return }
         PasteBack.write(.text(content))
         monitor.suppress(seconds: 1.5)
         HapticHelper.feedback()
     }
 
-    func runScript(_ script: ScriptAction) {
+    public func runScript(_ script: ScriptAction) {
 
         guard let item = beginRun() else { return }
         task = Task { @MainActor [weak self] in
@@ -233,9 +233,9 @@ final class AIWorkspaceModel: ObservableObject {
 
     // MARK: - 结果处置
 
-    var hasResult: Bool { (finished || !chatHistory.isEmpty) && !output.isEmpty }
+    public var hasResult: Bool { (finished || !chatHistory.isEmpty) && !output.isEmpty }
 
-    func copyResult() {
+    public func copyResult() {
         guard hasResult else { return }
         PasteBack.write(.text(output))
         monitor.suppress(seconds: 1.5)
@@ -243,7 +243,7 @@ final class AIWorkspaceModel: ObservableObject {
     }
 
     /// 结果作为新条目入库（原内容保留在历史中）。
-    func replaceAsNewItem() {
+    public func replaceAsNewItem() {
         guard hasResult else { return }
         _ = try? store.capture(
             kind: .text,
@@ -256,7 +256,7 @@ final class AIWorkspaceModel: ObservableObject {
     }
 
     /// 直接粘贴到唤起面板前的目标应用，随后关闭工作台与主面板。
-    func pasteResult() {
+    public func pasteResult() {
         guard hasResult else { return }
         let target = pasteTargetProvider?()
         let content = PasteboardContent.text(output)

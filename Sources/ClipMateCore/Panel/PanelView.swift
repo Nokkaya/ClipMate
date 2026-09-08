@@ -7,25 +7,37 @@ struct PanelView: View {
 
     var body: some View {
         panelCard
-            .frame(width: 720, height: 540) // 窗口比内容大一圈：给 SwiftUI 阴影留出绘制空间
+            .frame(width: viewModel.isAISidebarOpen ? 940 : 500, height: 580) // 窗口留边给阴影绘制
     }
 
     private var panelCard: some View {
         ZStack {
-            VStack(spacing: 0) {
-                SearchBar(viewModel: viewModel)
-                FilterChips(viewModel: viewModel)
-                Divider().overlay(Color.primary.opacity(0.08))
-                if viewModel.items.isEmpty {
-                    EmptyStateView(query: viewModel.query)
-                } else {
-                    ClipList(viewModel: viewModel)
+            HStack(spacing: 0) {
+                // 左侧：剪贴板列表主区域（瘦身 1/3：从 660px 缩减为 440px）
+                VStack(spacing: 0) {
+                    SearchBar(viewModel: viewModel)
+                    FilterChips(viewModel: viewModel)
+                    Divider().overlay(Color.primary.opacity(0.08))
+                    if viewModel.items.isEmpty {
+                        EmptyStateView(query: viewModel.query)
+                    } else {
+                        ClipList(viewModel: viewModel)
+                    }
+                    Divider().overlay(Color.primary.opacity(0.08))
+                    if viewModel.multiSelectedIDs.count > 1 {
+                        BatchActionBar(viewModel: viewModel)
+                    } else {
+                        FooterBar()
+                    }
                 }
-                Divider().overlay(Color.primary.opacity(0.08))
-                if viewModel.multiSelectedIDs.count > 1 {
-                    BatchActionBar(viewModel: viewModel)
-                } else {
-                    FooterBar()
+                .frame(width: 440)
+
+                // 右侧：内置 AI 问答侧边栏（可选平滑展开）
+                if viewModel.isAISidebarOpen {
+                    Divider().overlay(Color.primary.opacity(0.12))
+                    AISidebarView(viewModel: viewModel, model: viewModel.aiModel)
+                        .frame(width: 439)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .disabled(viewModel.showEditOverlay || viewModel.showSnippetOverlay || viewModel.showConfirmClear || viewModel.previewItem != nil)
@@ -35,7 +47,7 @@ struct PanelView: View {
             if viewModel.showConfirmClear { ConfirmClearOverlay(viewModel: viewModel) }
             if viewModel.previewItem != nil { PreviewOverlay(viewModel: viewModel) }
         }
-        .frame(width: 660, height: 480)
+        .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
         .background(VisualEffectBackground())
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -43,6 +55,7 @@ struct PanelView: View {
                 .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: viewModel.isAISidebarOpen)
     }
 }
 
@@ -58,9 +71,9 @@ struct SearchBar: View {
                 .foregroundStyle(.secondary)
             TextField(L10n.tr("search.placeholder"), text: $viewModel.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
-
+                .font(.system(size: 14))
                 .focused($focused)
+
             if !viewModel.query.isEmpty {
                 Button {
                     viewModel.query = ""
@@ -71,9 +84,34 @@ struct SearchBar: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            // AI 问答侧边栏快速展开/收起切换按钮
+            Button {
+                viewModel.toggleAISidebar()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("AI")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3.5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(viewModel.isAISidebarOpen ? Color.purple.opacity(0.18) : Color.primary.opacity(0.06))
+                )
+                .foregroundStyle(viewModel.isAISidebarOpen ? Color.purple : Color.secondary)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(viewModel.isAISidebarOpen ? Color.purple.opacity(0.5) : Color.clear, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .help("展开/收起 AI 问答侧边栏 (⌘K / ⌘⇧A)")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.vertical, 10)
         .onAppear { focused = true }
         .onReceive(NotificationCenter.default.publisher(for: .clipmateFocusSearch)) { _ in
             focused = true
@@ -323,18 +361,16 @@ struct EmptyStateView: View {
 
 struct FooterBar: View {
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             KeyHint("⏎", L10n.tr("footer.paste"))
             KeyHint("⌘⏎", L10n.tr("footer.copy"))
             KeyHint("⌘I", L10n.tr("footer.preview"))
-            KeyHint("⇧⏎", L10n.tr("batch.paste_queue"))
-            KeyHint("⌘⌥⏎", "纯文本")
-            KeyHint("⌘K", L10n.tr("footer.ai"))
+            KeyHint("⌘K", "AI")
             KeyHint("⌫", L10n.tr("footer.delete"))
             Spacer()
             KeyHint("Esc", L10n.tr("batch.cancel"))
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(Color.primary.opacity(0.04))
     }
