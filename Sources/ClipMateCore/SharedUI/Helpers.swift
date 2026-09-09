@@ -73,23 +73,8 @@ public enum ImageHelper {
 }
 
 public enum TimeHelper {
-    private static let shortFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MM-dd HH:mm"
-        return formatter
-    }()
-
-    /// 手写相对时间：RelativeDateTimeFormatter 每次调用开销大（列表渲染热点）。
     public static func relative(_ date: Date) -> String {
-        let interval = Date().timeIntervalSince(date)
-        switch interval {
-        case ..<0: return "刚刚"
-        case ..<60: return "刚刚"
-        case ..<3600: return "\(Int(interval / 60))分钟前"
-        case ..<86400: return "\(Int(interval / 3600))小时前"
-        case ..<(86400 * 30): return "\(Int(interval / 86400))天前"
-        default: return shortFormatter.string(from: date)
-        }
+        L10n.relativeTime(date)
     }
 }
 
