@@ -84,7 +84,7 @@ public final class ModernScroller: NSScroller {
 
     /// 绘制现代细长胶囊药丸滑块
     public override func drawKnob() {
-        guard knobProportion > 0 else { return }
+        guard knobProportion > 0 && knobProportion < 1.0 else { return }
         let knobRect = rect(for: .knob)
         guard knobRect.width > 0, knobRect.height > 0 else { return }
 
