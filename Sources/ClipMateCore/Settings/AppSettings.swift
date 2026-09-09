@@ -27,22 +27,156 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Codable {
 }
 
 
-/// 用户自定义脚本动作：剪贴板文本经 stdin 传入命令，stdout 作为结果。
+public enum ScriptType: String, Codable, CaseIterable {
+    case shell = "shell"
+    case shortcut = "shortcut"
+}
+
+/// 用户自定义脚本与快捷指令动作：剪贴板文本经 stdin 传入命令，stdout 作为结果。
 public struct ScriptAction: Codable, Identifiable, Equatable {
     public var id: String
     public var name: String
     public var command: String
+    public var type: ScriptType
+    public var icon: String
 
-    public init(id: String = UUID().uuidString, name: String, command: String) {
+    public init(id: String = UUID().uuidString, name: String, command: String, type: ScriptType = .shell, icon: String = "terminal") {
         self.id = id
         self.name = name
         self.command = command
+        self.type = type
+        self.icon = icon
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, command, type, icon
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        self.name = try container.decode(String.self, forKey: .name)
+        self.command = try container.decode(String.self, forKey: .command)
+        self.type = try container.decodeIfPresent(ScriptType.self, forKey: .type) ?? .shell
+        self.icon = try container.decodeIfPresent(String.self, forKey: .icon) ?? (self.type == .shortcut ? "bolt.horizontal.fill" : "terminal")
+    }
+
+    /// 极客预置动作库
+    public static let presetLibrary: [ScriptAction] = [
+        ScriptAction(
+            id: "preset_timestamp_date",
+            name: "时间戳转日期",
+            command: "python3 -c \"import sys, datetime; raw=sys.stdin.read().strip(); ts=float(raw); print(datetime.datetime.fromtimestamp(ts/1000 if ts>1e11 else ts).strftime('%Y-%m-%d %H:%M:%S'))\"",
+            type: .shell,
+            icon: "clock.arrow.circlepath"
+        ),
+        ScriptAction(
+            id: "preset_base64_decode",
+            name: "Base64 解码",
+            command: "base64 --decode",
+            type: .shell,
+            icon: "lock.open.fill"
+        ),
+        ScriptAction(
+            id: "preset_base64_encode",
+            name: "Base64 编码",
+            command: "base64",
+            type: .shell,
+            icon: "lock.fill"
+        ),
+        ScriptAction(
+            id: "preset_json_format",
+            name: "JSON 美化排版",
+            command: "python3 -m json.tool",
+            type: .shell,
+            icon: "curlybraces"
+        ),
+        ScriptAction(
+            id: "preset_json_minify",
+            name: "JSON 紧凑压缩",
+            command: "python3 -c \"import sys, json; print(json.dumps(json.loads(sys.stdin.read()), separators=(',', ':')))\"",
+            type: .shell,
+            icon: "arrow.right.to.line.compact"
+        ),
+        ScriptAction(
+            id: "preset_url_decode",
+            name: "URL 解码",
+            command: "python3 -c \"import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read()))\"",
+            type: .shell,
+            icon: "link"
+        ),
+        ScriptAction(
+            id: "preset_url_encode",
+            name: "URL 编码",
+            command: "python3 -c \"import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read()))\"",
+            type: .shell,
+            icon: "link.badge.plus"
+        ),
+        ScriptAction(
+            id: "preset_sha256",
+            name: "SHA-256 哈希",
+            command: "shasum -a 256 | awk '{print $1}'",
+            type: .shell,
+            icon: "number"
+        ),
+        ScriptAction(
+            id: "preset_md5",
+            name: "MD5 哈希",
+            command: "md5 -q",
+            type: .shell,
+            icon: "number.circle"
+        ),
+        ScriptAction(
+            id: "preset_word_count",
+            name: "字数与行数统计",
+            command: "wc -l -w -m | awk '{print \"行数: \" $1 \"  词数: \" $2 \"  字符数: \" $3}'",
+            type: .shell,
+            icon: "text.word.spacing"
+        ),
+        ScriptAction(
+            id: "preset_extract_urls",
+            name: "提取所有网址",
+            command: "grep -oE 'https?://[^[:space:]<>\"]+' | sort -u",
+            type: .shell,
+            icon: "globe"
+        ),
+        ScriptAction(
+            id: "preset_extract_emails",
+            name: "提取所有邮箱",
+            command: "grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}' | sort -u",
+            type: .shell,
+            icon: "envelope"
+        ),
+        ScriptAction(
+            id: "preset_strip_newlines",
+            name: "去除所有空行",
+            command: "awk 'NF'",
+            type: .shell,
+            icon: "line.horizontal.3.decrease"
+        ),
+        ScriptAction(
+            id: "preset_snake_case",
+            name: "转下划线命名",
+            command: "tr '[:upper:]' '[:lower:]' | tr ' ' '_'",
+            type: .shell,
+            icon: "textformat.characters"
+        ),
+    ]
+
+    /// 首次启动默认启用的预置动作
+    public static let defaultPresets: [ScriptAction] = [
+        presetLibrary[0], // 时间戳转日期
+        presetLibrary[1], // Base64 解码
+        presetLibrary[3], // JSON 美化排版
+        presetLibrary[9], // 字数与行数统计
+    ]
 }
 
 /// 应用设置（UserDefaults 持久化；API Key 走 Keychain）。
 public final class AppSettings: ObservableObject {
     public static let hotkeyChangedNotification = Notification.Name("clipmate.hotkeyChanged")
+    public static let languageChangedNotification = Notification.Name("clipmate.languageChanged")
+    public static let themeChangedNotification = Notification.Name("clipmate.themeChanged")
 
     public static let hotkeyPresets: [HotkeyPreset] = [
         HotkeyPreset(id: "cmdShiftV", keyCode: UInt32(kVK_ANSI_V),
@@ -115,7 +249,10 @@ public final class AppSettings: ObservableObject {
         }
     }
     @Published public var hapticFeedbackEnabled: Bool {
-        didSet { defaults.set(hapticFeedbackEnabled, forKey: "hapticFeedbackEnabled") }
+        didSet {
+            defaults.set(hapticFeedbackEnabled, forKey: "hapticFeedbackEnabled")
+            HapticHelper.isEnabled = hapticFeedbackEnabled
+        }
     }
     @Published public var customPrompts: [PromptTemplate] {
         didSet {
@@ -131,13 +268,30 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(smartTitleEnabled, forKey: "smartTitleEnabled") }
     }
     @Published public var appLanguage: AppLanguage {
-        didSet { defaults.set(appLanguage.rawValue, forKey: "appLanguage") }
+        didSet {
+            defaults.set(appLanguage.rawValue, forKey: "appLanguage")
+            L10n.overrideLanguage = appLanguage
+            NotificationCenter.default.post(name: Self.languageChangedNotification, object: nil)
+        }
+    }
+    @Published public var appTheme: AppTheme {
+        didSet {
+            defaults.set(appTheme.rawValue, forKey: "appTheme")
+            Palette.currentTheme = appTheme
+            NotificationCenter.default.post(name: Self.themeChangedNotification, object: appTheme)
+        }
     }
     @Published public var lastPanelPositionX: Double? {
         didSet { defaults.set(lastPanelPositionX, forKey: "lastPanelPositionX") }
     }
     @Published public var lastPanelPositionY: Double? {
         didSet { defaults.set(lastPanelPositionY, forKey: "lastPanelPositionY") }
+    }
+    @Published public var autoCheckUpdates: Bool {
+        didSet { defaults.set(autoCheckUpdates, forKey: "autoCheckUpdates") }
+    }
+    @Published public var lastUpdateCheckDate: Date? {
+        didSet { defaults.set(lastUpdateCheckDate, forKey: "lastUpdateCheckDate") }
     }
 
 
@@ -174,6 +328,8 @@ public final class AppSettings: ObservableObject {
             "panelPositionMode": "center",
             "smartTitleEnabled": true,
             "appLanguage": "system",
+            "appTheme": "default",
+            "autoCheckUpdates": true,
         ])
         hotkeyPresetID = defaults.string(forKey: "hotkeyPresetID") ?? "cmdShiftV"
         retentionMaxItems = defaults.integer(forKey: "retentionMaxItems")
@@ -181,7 +337,9 @@ public final class AppSettings: ObservableObject {
         maxCaptureMB = defaults.integer(forKey: "maxCaptureMB")
         excludedApps = defaults.array(forKey: "excludedApps") as? [String] ?? Self.defaultExcludedApps
         soundOnCapture = defaults.bool(forKey: "soundOnCapture")
-        hapticFeedbackEnabled = defaults.object(forKey: "hapticFeedbackEnabled") as? Bool ?? true
+        let hapticEnabled = defaults.object(forKey: "hapticFeedbackEnabled") as? Bool ?? true
+        hapticFeedbackEnabled = hapticEnabled
+        HapticHelper.isEnabled = hapticEnabled
         launchAtLogin = defaults.bool(forKey: "launchAtLogin")
         pauseCapture = defaults.bool(forKey: "pauseCapture")
         aiEnabled = defaults.bool(forKey: "aiEnabled")
@@ -194,7 +352,15 @@ public final class AppSettings: ObservableObject {
         panelPositionMode = PanelPositionMode(rawValue: modeRaw) ?? .center
         smartTitleEnabled = defaults.object(forKey: "smartTitleEnabled") as? Bool ?? true
         let langRaw = defaults.string(forKey: "appLanguage") ?? "system"
-        appLanguage = AppLanguage(rawValue: langRaw) ?? .system
+        let initialLang = AppLanguage(rawValue: langRaw) ?? .system
+        appLanguage = initialLang
+        L10n.overrideLanguage = initialLang
+        let themeRaw = defaults.string(forKey: "appTheme") ?? "default"
+        let initialTheme = AppTheme(rawValue: themeRaw) ?? .default
+        appTheme = initialTheme
+        Palette.currentTheme = initialTheme
+        autoCheckUpdates = defaults.object(forKey: "autoCheckUpdates") as? Bool ?? true
+        lastUpdateCheckDate = defaults.object(forKey: "lastUpdateCheckDate") as? Date
         if defaults.object(forKey: "lastPanelPositionX") != nil {
             lastPanelPositionX = defaults.double(forKey: "lastPanelPositionX")
         } else {
@@ -209,7 +375,7 @@ public final class AppSettings: ObservableObject {
         if let scriptData = defaults.data(forKey: "customScripts") {
             customScripts = (try? JSONDecoder().decode([ScriptAction].self, from: scriptData)) ?? []
         } else {
-            customScripts = []
+            customScripts = ScriptAction.defaultPresets
         }
         if let promptData = defaults.data(forKey: "customPrompts") {
             customPrompts = (try? JSONDecoder().decode([PromptTemplate].self, from: promptData)) ?? PromptTemplate.defaults

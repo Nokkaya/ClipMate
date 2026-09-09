@@ -23,7 +23,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.toolTip = "ClipMate 剪贴板历史"
+        item.button?.toolTip = L10n.tr("menu.tooltip")
         let menu = NSMenu()
         menu.delegate = self
         menu.autoenablesItems = false
@@ -34,6 +34,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         settings.$pauseCapture
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.updateIcon() }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: AppSettings.languageChangedNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.statusItem?.button?.toolTip = L10n.tr("menu.tooltip")
+            }
             .store(in: &cancellables)
     }
 
@@ -114,7 +121,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         let recents = store.search(query: "", filter: .all, limit: 5)
         if recents.isEmpty {
-            let empty = NSMenuItem(title: "  （暂无历史记录）", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: L10n.tr("menu.empty"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         } else {
@@ -133,13 +140,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
-        let panelItem = NSMenuItem(title: "打开主面板", action: #selector(togglePanelAction), keyEquivalent: "")
+        let panelItem = NSMenuItem(title: L10n.tr("menu.open_panel"), action: #selector(togglePanelAction), keyEquivalent: "")
         panelItem.target = self
         panelItem.isEnabled = true
         menu.addItem(panelItem)
 
         let pauseItem = NSMenuItem(
-            title: settings.pauseCapture ? "恢复采集" : "暂停采集",
+            title: settings.pauseCapture ? L10n.tr("menu.resume_capture") : L10n.tr("menu.pause_capture"),
             action: #selector(togglePause),
             keyEquivalent: ""
         )
@@ -147,29 +154,34 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         pauseItem.isEnabled = true
         menu.addItem(pauseItem)
 
-        let clearItem = NSMenuItem(title: "清空历史（保留固定）", action: #selector(clearAll), keyEquivalent: "")
+        let clearItem = NSMenuItem(title: L10n.tr("menu.clear_history"), action: #selector(clearAll), keyEquivalent: "")
         clearItem.target = self
         clearItem.isEnabled = true
         menu.addItem(clearItem)
 
-        let exportItem = NSMenuItem(title: "导出历史…", action: #selector(exportHistoryAction), keyEquivalent: "")
+        let exportItem = NSMenuItem(title: L10n.tr("menu.export"), action: #selector(exportHistoryAction), keyEquivalent: "")
         exportItem.target = self
         exportItem.isEnabled = true
         menu.addItem(exportItem)
 
-        let importItem = NSMenuItem(title: "导入历史…", action: #selector(importHistoryAction), keyEquivalent: "")
+        let importItem = NSMenuItem(title: L10n.tr("menu.import"), action: #selector(importHistoryAction), keyEquivalent: "")
         importItem.target = self
         importItem.isEnabled = true
         menu.addItem(importItem)
 
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "设置…", action: #selector(openSettingsAction), keyEquivalent: ",")
+        let updateItem = NSMenuItem(title: L10n.tr("menu.check_updates"), action: #selector(checkUpdatesAction), keyEquivalent: "")
+        updateItem.target = self
+        updateItem.isEnabled = true
+        menu.addItem(updateItem)
+
+        let settingsItem = NSMenuItem(title: L10n.tr("menu.settings"), action: #selector(openSettingsAction), keyEquivalent: ",")
         settingsItem.target = self
         settingsItem.isEnabled = true
         menu.addItem(settingsItem)
 
-        menu.addItem(NSMenuItem(title: "退出 ClipMate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: L10n.tr("menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
     // MARK: - Actions
@@ -195,4 +207,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func importHistoryAction() { onImportHistory?() }
 
     @objc private func openSettingsAction() { onOpenSettings?() }
+    @objc private func checkUpdatesAction() {
+        UpdateManager.shared.checkForUpdates(settings: settings, manual: true)
+        // 若设置窗口未打开，弹出通知或打开关于页
+        onOpenSettings?()
+    }
 }

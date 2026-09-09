@@ -11,7 +11,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             let alert = NSAlert()
             alert.alertStyle = .critical
-            alert.messageText = "ClipMate 启动失败"
+            alert.messageText = L10n.tr("app.launch_failed")
             alert.informativeText = error.localizedDescription
             alert.runModal()
             NSApp.terminate(nil)

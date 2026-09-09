@@ -11,19 +11,19 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralTab(settings: settings, store: store)
-                .tabItem { Label("通用", systemImage: "gearshape") }
+                .tabItem { Label(L10n.tr("tab.general"), systemImage: "gearshape") }
             SnippetsTab(store: store)
-                .tabItem { Label("片段", systemImage: "bookmark") }
+                .tabItem { Label(L10n.tr("tab.snippets"), systemImage: "bookmark") }
             CaptureTab(settings: settings, store: store)
-                .tabItem { Label("采集", systemImage: "doc.on.doc") }
+                .tabItem { Label(L10n.tr("tab.capture"), systemImage: "doc.on.doc") }
             PrivacyTab(settings: settings, frontApps: frontApps)
-                .tabItem { Label("隐私", systemImage: "hand.raised") }
+                .tabItem { Label(L10n.tr("tab.privacy"), systemImage: "hand.raised") }
             AITab(settings: settings, ai: ai)
-                .tabItem { Label("AI", systemImage: "sparkles") }
+                .tabItem { Label(L10n.tr("tab.ai"), systemImage: "sparkles") }
             ScriptsTab(settings: settings)
-                .tabItem { Label("脚本", systemImage: "terminal") }
-            AboutTab()
-                .tabItem { Label("关于", systemImage: "info.circle") }
+                .tabItem { Label(L10n.tr("tab.scripts"), systemImage: "terminal") }
+            AboutTab(settings: settings)
+                .tabItem { Label(L10n.tr("tab.about"), systemImage: "info.circle") }
         }
         .frame(width: 670, height: 540)
     }
@@ -118,7 +118,7 @@ private struct SettingsRow<Control: View>: View {
 private enum BackupHelper {
     static func exportBackup(store: ClipStore) {
         let savePanel = NSSavePanel()
-        savePanel.title = "导出剪贴板历史与片段备份"
+        savePanel.title = L10n.tr("settings.backup.export_title")
         savePanel.nameFieldStringValue = "ClipMate-Backup-\(Int(Date().timeIntervalSince1970)).json"
         savePanel.allowedContentTypes = [.json]
         savePanel.canCreateDirectories = true
@@ -128,12 +128,12 @@ private enum BackupHelper {
             try data.write(to: url)
             HapticHelper.generic()
             let alert = NSAlert()
-            alert.messageText = "导出成功"
-            alert.informativeText = "已成功将 \(store.itemCount()) 条记录备份至：\n\(url.lastPathComponent)"
+            alert.messageText = L10n.tr("settings.backup.export_success")
+            alert.informativeText = L10n.tr("settings.backup.export_success_msg", store.itemCount(), url.lastPathComponent)
             alert.runModal()
         } catch {
             let alert = NSAlert()
-            alert.messageText = "导出失败"
+            alert.messageText = L10n.tr("settings.backup.export_failed")
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
@@ -141,7 +141,7 @@ private enum BackupHelper {
 
     static func importBackup(store: ClipStore) {
         let openPanel = NSOpenPanel()
-        openPanel.title = "从备份文件恢复"
+        openPanel.title = L10n.tr("settings.backup.import_title")
         openPanel.allowedContentTypes = [.json]
         openPanel.canChooseFiles = true
         openPanel.canChooseDirectories = false
@@ -151,15 +151,122 @@ private enum BackupHelper {
             let count = try store.importJSON(data)
             HapticHelper.generic()
             let alert = NSAlert()
-            alert.messageText = "恢复成功"
-            alert.informativeText = "新入库 \(count) 条记录（已有相同内容已自动跳过合并）。"
+            alert.messageText = L10n.tr("settings.backup.import_success")
+            alert.informativeText = L10n.tr("settings.backup.import_success_msg", count)
             alert.runModal()
         } catch {
             let alert = NSAlert()
-            alert.messageText = "恢复失败"
+            alert.messageText = L10n.tr("settings.backup.import_failed")
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
+    }
+}
+
+// MARK: - 主题外观选择卡片
+
+private struct ThemeGallerySection: View {
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        SettingsCard(
+            L10n.tr("settings.theme.card_title"),
+            icon: "paintpalette.fill",
+            iconColor: settings.appTheme.accent,
+            trailing: {
+                Text(L10n.themeTitle(settings.appTheme, lang: settings.appLanguage))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(settings.appTheme.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(settings.appTheme.accent.opacity(0.12)))
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.tr("settings.theme.desc"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+                    spacing: 8
+                ) {
+                    ForEach(AppTheme.allCases) { theme in
+                        ThemeChip(
+                            theme: theme,
+                            isSelected: settings.appTheme == theme,
+                            currentLang: settings.appLanguage
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                settings.appTheme = theme
+                            }
+                            HapticHelper.generic()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 紧凑主题芯片：左侧微缩色板 + 名称，悬停显示该主题简介。
+private struct ThemeChip: View {
+    let theme: AppTheme
+    let isSelected: Bool
+    let currentLang: AppLanguage
+    let onSelect: () -> Void
+
+    @State private var isHovered = false
+
+    /// 微缩色板：底色 + 强调色 + 两个预览色。
+    private var swatches: [Color] {
+        [theme.previewBackgroundColor, theme.accent] + Array(theme.previewSwatches.prefix(2))
+    }
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 6) {
+                HStack(spacing: 2) {
+                    ForEach(Array(swatches.enumerated()), id: \.offset) { _, color in
+                        Circle()
+                            .fill(color)
+                            .frame(width: 7, height: 7)
+                            .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+                    }
+                }
+
+                Text(L10n.themeTitle(theme, lang: currentLang))
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? theme.accent : Color.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 4)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(theme.accent)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(isSelected
+                          ? theme.accent.opacity(0.12)
+                          : (isHovered ? Color.primary.opacity(0.06) : Color.primary.opacity(0.03)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(isSelected ? theme.accent : Color.primary.opacity(0.08),
+                                  lineWidth: isSelected ? 1.2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(L10n.themeDesc(theme, lang: currentLang))
     }
 }
 
@@ -172,10 +279,13 @@ private struct GeneralTab: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
+                // 卡片 0: 界面外观与主题风格
+                ThemeGallerySection(settings: settings)
+
                 // 卡片 1: 交互与启动
-                SettingsCard("交互与常规设置", icon: "gearshape.fill", iconColor: .accentColor) {
+                SettingsCard(L10n.tr("settings.general.card_interaction"), icon: "gearshape.fill", iconColor: .accentColor) {
                     VStack(spacing: 10) {
-                        SettingsRow("全局热键", subtitle: "随时随地呼出或隐藏 ClipMate 主搜索面板") {
+                        SettingsRow(L10n.tr("settings.hotkey"), subtitle: L10n.tr("settings.hotkey_sub")) {
                             Picker("", selection: $settings.hotkeyPresetID) {
                                 ForEach(AppSettings.hotkeyPresets) { preset in
                                     Text(preset.display).tag(preset.id)
@@ -187,7 +297,7 @@ private struct GeneralTab: View {
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("面板出现位置", subtitle: "选择主面板在多显示器或光标附近的定位策略") {
+                        SettingsRow(L10n.tr("settings.position"), subtitle: L10n.tr("settings.position_sub")) {
                             Picker("", selection: $settings.panelPositionMode) {
                                 ForEach(PanelPositionMode.allCases) { mode in
                                     Text(L10n.positionModeTitle(mode)).tag(mode)
@@ -199,7 +309,7 @@ private struct GeneralTab: View {
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("界面显示语言", subtitle: "自定义应用程序的界面语言或自动跟随系统") {
+                        SettingsRow(L10n.tr("settings.language"), subtitle: L10n.tr("settings.language_sub")) {
                             Picker("", selection: $settings.appLanguage) {
                                 ForEach(AppLanguage.allCases) { lang in
                                     Text(L10n.languageTitle(lang)).tag(lang)
@@ -211,21 +321,21 @@ private struct GeneralTab: View {
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("开机自动启动", subtitle: "登录 macOS 系统时在后台自动启动常驻") {
+                        SettingsRow(L10n.tr("settings.launch_at_login"), subtitle: L10n.tr("settings.launch_at_login_sub")) {
                             Toggle("", isOn: $settings.launchAtLogin)
                                 .toggleStyle(.switch)
                         }
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("剪贴板提示音", subtitle: "捕获到新的剪贴板内容时播放提示音") {
+                        SettingsRow(L10n.tr("settings.sound"), subtitle: L10n.tr("settings.sound_sub")) {
                             Toggle("", isOn: $settings.soundOnCapture)
                                 .toggleStyle(.switch)
                         }
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("触控板触觉反馈", subtitle: "复制、粘贴、清空等操作时触发触控板轻微震动") {
+                        SettingsRow(L10n.tr("settings.haptic"), subtitle: L10n.tr("settings.haptic_sub")) {
                             Toggle("", isOn: $settings.hapticFeedbackEnabled)
                                 .toggleStyle(.switch)
                         }
@@ -235,11 +345,11 @@ private struct GeneralTab: View {
 
                 // 卡片 2: 备份与恢复
                 SettingsCard(
-                    "数据备份与迁移",
+                    L10n.tr("settings.backup.card_title"),
                     icon: "arrow.triangle.2.circlepath",
                     iconColor: .blue,
                     trailing: {
-                        Text("历史 \(store.itemCount()) 条 · 片段 \(store.allSnippets().count) 条")
+                        Text(L10n.tr("settings.backup.stats", store.itemCount(), store.allSnippets().count))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 8)
@@ -248,7 +358,7 @@ private struct GeneralTab: View {
                     }
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("支持将本地存储的全部剪贴板历史与自定义片段完整导出为 JSON 备份文件，换机或重装时可无损导入合并。")
+                        Text(L10n.tr("settings.backup.desc"))
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
 
@@ -256,7 +366,7 @@ private struct GeneralTab: View {
                             Button {
                                 BackupHelper.exportBackup(store: store)
                             } label: {
-                                Label("导出完整备份 (JSON)", systemImage: "square.and.arrow.up")
+                                Label(L10n.tr("settings.backup.export"), systemImage: "square.and.arrow.up")
                                     .font(.system(size: 12))
                             }
                             .buttonStyle(.bordered)
@@ -264,7 +374,7 @@ private struct GeneralTab: View {
                             Button {
                                 BackupHelper.importBackup(store: store)
                             } label: {
-                                Label("从备份恢复 (JSON)", systemImage: "square.and.arrow.down")
+                                Label(L10n.tr("settings.backup.import"), systemImage: "square.and.arrow.down")
                                     .font(.system(size: 12))
                             }
                             .buttonStyle(.bordered)
@@ -273,16 +383,16 @@ private struct GeneralTab: View {
                 }
 
                 // 卡片 3: 快捷键指南
-                SettingsCard("主面板常用快捷键", icon: "keyboard.fill", iconColor: .purple) {
+                SettingsCard(L10n.tr("settings.shortcuts.card_title"), icon: "keyboard.fill", iconColor: .blue) {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        shortcutBadge(key: "⏎ 回车", action: "粘贴至当前光标处")
-                        shortcutBadge(key: "⌘⏎", action: "复制到剪贴板并置顶")
-                        shortcutBadge(key: "⌥⏎", action: "原地快速编辑正文")
-                        shortcutBadge(key: "⌘K", action: "唤起 AI 智能助手")
-                        shortcutBadge(key: "⌘I", action: "开关详情抽屉预览")
-                        shortcutBadge(key: "⌘1 ~ 9", action: "一键快速贴出指定序号项")
-                        shortcutBadge(key: "⇧↑ / ⇧↓", action: "多选选中多条记录")
-                        shortcutBadge(key: "Tab", action: "快速在分类栏间轮换")
+                        shortcutBadge(key: "⏎", action: L10n.tr("settings.shortcuts.paste"))
+                        shortcutBadge(key: "⌘⏎", action: L10n.tr("settings.shortcuts.copy"))
+                        shortcutBadge(key: "⌥⏎", action: L10n.tr("settings.shortcuts.edit"))
+                        shortcutBadge(key: "⌘K", action: L10n.tr("settings.shortcuts.ai"))
+                        shortcutBadge(key: "⌘I", action: L10n.tr("settings.shortcuts.preview"))
+                        shortcutBadge(key: "⌘1 ~ 9", action: L10n.tr("settings.shortcuts.quick_paste"))
+                        shortcutBadge(key: "⇧↑ / ⇧↓", action: L10n.tr("settings.shortcuts.multiselect"))
+                        shortcutBadge(key: "Tab", action: L10n.tr("settings.shortcuts.switch_tab"))
                     }
                 }
             }
@@ -331,7 +441,7 @@ private struct SnippetsTab: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    TextField("搜索片段标题、正文或短码…", text: $searchKeyword)
+                    TextField(L10n.tr("snippets.search_placeholder"), text: $searchKeyword)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12.5))
                     if !searchKeyword.isEmpty {
@@ -353,11 +463,10 @@ private struct SnippetsTab: View {
                 Button {
                     openNew()
                 } label: {
-                    Label("新建片段", systemImage: "plus")
+                    Label(L10n.tr("snippets.new"), systemImage: "plus")
                         .font(.system(size: 12, weight: .medium))
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.purple)
+                .clipMateAccent(size: .small, tint: Palette.snippet)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -370,16 +479,16 @@ private struct SnippetsTab: View {
                         selectedGroup = nil
                         HapticHelper.alignment()
                     } label: {
-                        Text("全部 (\(snippets.count))")
+                        Text("\(L10n.tr("snippets.all_groups")) (\(snippets.count))")
                             .font(.system(size: 11, weight: selectedGroup == nil ? .semibold : .regular))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 3.5)
                             .background(
                                 Capsule().fill(
-                                    selectedGroup == nil ? Color.purple.opacity(0.2) : Color.primary.opacity(0.05)
+                                    selectedGroup == nil ? Palette.snippet.opacity(0.18) : Color.primary.opacity(0.05)
                                 )
                             )
-                            .foregroundStyle(selectedGroup == nil ? Color.purple : Color.secondary)
+                            .foregroundStyle(selectedGroup == nil ? Palette.snippet : Color.secondary)
                     }
                     .buttonStyle(.plain)
 
@@ -396,10 +505,10 @@ private struct SnippetsTab: View {
                                 .padding(.vertical, 3.5)
                                 .background(
                                     Capsule().fill(
-                                        isSelected ? Color.purple.opacity(0.2) : Color.primary.opacity(0.05)
+                                        isSelected ? Palette.snippet.opacity(0.18) : Color.primary.opacity(0.05)
                                     )
                                 )
-                                .foregroundStyle(isSelected ? Color.purple : Color.secondary)
+                                .foregroundStyle(isSelected ? Palette.snippet : Color.secondary)
                         }
                         .buttonStyle(.plain)
                     }
@@ -419,10 +528,10 @@ private struct SnippetsTab: View {
                     Image(systemName: "bookmark")
                         .font(.system(size: 36))
                         .foregroundStyle(.quaternary)
-                    Text(snippets.isEmpty ? "暂无片段，点击右上角新建常用片段" : "未找到匹配的片段")
+                    Text(snippets.isEmpty ? L10n.tr("snippets.empty") : L10n.tr("snippets.no_match"))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text(snippets.isEmpty ? "可以将常用代码、开票信息、回复模板收录于此" : "尝试更换搜索关键字或分组")
+                    Text(snippets.isEmpty ? L10n.tr("snippets.empty_sub") : L10n.tr("empty.no_match_sub"))
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                     Spacer()
@@ -452,7 +561,7 @@ private struct SnippetsTab: View {
             HStack(spacing: 6) {
                 Image(systemName: "bookmark.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(Color.purple)
+                    .foregroundStyle(Palette.snippet)
 
                 if let title = item.title, !title.isEmpty {
                     Text(title)
@@ -468,8 +577,8 @@ private struct SnippetsTab: View {
                         .font(.system(size: 9.5))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1.5)
-                        .background(Capsule().fill(Color.purple.opacity(0.14)))
-                        .foregroundStyle(Color.purple)
+                        .background(Capsule().fill(Palette.snippet.opacity(0.14)))
+                        .foregroundStyle(Palette.snippet)
                 }
 
                 if let sc = item.snippetShortcode, !sc.isEmpty {
@@ -483,7 +592,7 @@ private struct SnippetsTab: View {
 
                 Spacer()
 
-                Text("\(item.plainText.count) 字符")
+                Text(L10n.tr("meta.chars", item.plainText.count))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
 
@@ -501,7 +610,7 @@ private struct SnippetsTab: View {
                         HStack(spacing: 2) {
                             Image(systemName: copiedID == item.id ? "checkmark" : "doc.on.doc")
                             if copiedID == item.id {
-                                Text("已复制").font(.system(size: 10))
+                                Text(L10n.tr("action.copied")).font(.system(size: 10))
                             }
                         }
                         .font(.system(size: 11))
@@ -511,7 +620,7 @@ private struct SnippetsTab: View {
                         .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.05)))
                     }
                     .buttonStyle(.plain)
-                    .help("复制片段内容")
+                    .help(L10n.tr("snippets.copy_tip"))
 
                     Button {
                         openEdit(item: item)
@@ -523,7 +632,7 @@ private struct SnippetsTab: View {
                             .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.05)))
                     }
                     .buttonStyle(.plain)
-                    .help("编辑片段")
+                    .help(L10n.tr("snippets.edit_tip"))
 
                     Button {
                         deleteSnippet(item: item)
@@ -535,7 +644,7 @@ private struct SnippetsTab: View {
                             .background(RoundedRectangle(cornerRadius: 5).fill(Color.red.opacity(0.06)))
                     }
                     .buttonStyle(.plain)
-                    .help("删除片段")
+                    .help(L10n.tr("snippets.delete_tip"))
                 }
             }
 
@@ -605,14 +714,14 @@ private struct SnippetsTab: View {
             HStack(spacing: 8) {
                 Image(systemName: "bookmark.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.purple)
+                    .foregroundStyle(Palette.snippet)
                     .frame(width: 26, height: 26)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.purple.opacity(0.15)))
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Palette.snippet.opacity(0.15)))
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(editingID == nil ? "新建常用片段" : "编辑片段")
+                    Text(editingID == nil ? L10n.tr("snippets.editor_title_new") : L10n.tr("snippets.editor_title_edit"))
                         .font(.system(size: 14, weight: .semibold))
-                    Text("输入片段信息，保存后支持在主面板和设置中快速调用")
+                    Text(L10n.tr("snippets.editor_subtitle"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -633,29 +742,29 @@ private struct SnippetsTab: View {
             // 字段
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("片段标题（可选）", systemImage: "textformat")
+                    Label(L10n.tr("snippets.title_optional"), systemImage: "textformat")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
-                    TextField("如：日常开票信息、Git 常用流、邮箱签名…", text: $draftTitle)
+                    TextField(L10n.tr("snippets.title_placeholder"), text: $draftTitle)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12))
                 }
 
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("分组", systemImage: "folder.fill")
+                        Label(L10n.tr("snippets.group"), systemImage: "folder.fill")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
-                        TextField("如：开发 / 常用 / 邮件", text: $draftGroup)
+                        TextField(L10n.tr("snippets.group_placeholder"), text: $draftGroup)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("快捷短码（可选）", systemImage: "bolt.fill")
+                        Label(L10n.tr("snippets.shortcode_optional"), systemImage: "bolt.fill")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
-                        TextField("如：;tax、;sig", text: $draftShortcode)
+                        TextField(L10n.tr("snippets.shortcode_placeholder"), text: $draftShortcode)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12, design: .monospaced))
                     }
@@ -665,7 +774,7 @@ private struct SnippetsTab: View {
                 if !groups.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 4) {
-                            Text("已有分组:")
+                            Text(L10n.tr("snippets.existing_groups"))
                                 .font(.system(size: 10))
                                 .foregroundStyle(.tertiary)
                             ForEach(groups, id: \.self) { g in
@@ -689,11 +798,11 @@ private struct SnippetsTab: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Label("片段正文", systemImage: "doc.text.fill")
+                        Label(L10n.tr("snippets.content"), systemImage: "doc.text.fill")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("\(draftContent.count) 字符")
+                        Text(L10n.tr("meta.chars", draftContent.count))
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }
@@ -714,14 +823,14 @@ private struct SnippetsTab: View {
 
             // 底部操作栏
             HStack {
-                Button("取消") {
+                Button(L10n.tr("action.cancel")) {
                     showEditor = false
                 }
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
-                Button("保存片段") {
+                Button(L10n.tr("snippets.save")) {
                     let content = draftContent.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !content.isEmpty else { return }
                     if let id = editingID {
@@ -744,8 +853,7 @@ private struct SnippetsTab: View {
                     loadData()
                     HapticHelper.feedback()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.purple)
+                .clipMateAccent(size: .regular, tint: Palette.snippet)
                 .keyboardShortcut(.defaultAction)
                 .disabled(draftContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -766,11 +874,11 @@ private struct CaptureTab: View {
         ScrollView {
             VStack(spacing: 14) {
                 // 卡片 1: 留存与清理策略
-                SettingsCard("历史容量与留存策略", icon: "clock.arrow.circlepath", iconColor: .blue) {
+                SettingsCard(L10n.tr("capture.card_retention"), icon: "clock.arrow.circlepath", iconColor: .blue) {
                     VStack(spacing: 10) {
-                        SettingsRow("最多保留条数", subtitle: "超出上限时自动淘汰最旧的历史记录（已固定的条目永不清除）") {
+                        SettingsRow(L10n.tr("capture.max_items"), subtitle: L10n.tr("capture.max_items_sub")) {
                             HStack(spacing: 6) {
-                                Text("\(settings.retentionMaxItems) 条")
+                                Text(L10n.tr("capture.items_unit", settings.retentionMaxItems))
                                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                     .frame(width: 65, alignment: .trailing)
                                 Stepper("", value: $settings.retentionMaxItems, in: 50...10000, step: 50)
@@ -780,9 +888,9 @@ private struct CaptureTab: View {
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("保留天数周期", subtitle: "历史记录默认保留的最大时间窗口") {
+                        SettingsRow(L10n.tr("capture.max_days"), subtitle: L10n.tr("capture.max_days_sub")) {
                             HStack(spacing: 6) {
-                                Text("\(settings.retentionMaxAgeDays) 天")
+                                Text(L10n.tr("capture.days_unit", settings.retentionMaxAgeDays))
                                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                     .frame(width: 65, alignment: .trailing)
                                 Stepper("", value: $settings.retentionMaxAgeDays, in: 1...365)
@@ -792,7 +900,7 @@ private struct CaptureTab: View {
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("单条内容容量上限", subtitle: "单次复制体积超出该阈值的内容将自动丢弃，防止内存过载") {
+                        SettingsRow(L10n.tr("capture.max_size"), subtitle: L10n.tr("capture.max_size_sub")) {
                             HStack(spacing: 6) {
                                 Text("\(settings.maxCaptureMB) MB")
                                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -805,23 +913,23 @@ private struct CaptureTab: View {
                 }
 
                 // 卡片 2: 智能识别与增强
-                SettingsCard("智能识别与元数据增强", icon: "sparkle.magnifyingglass", iconColor: .purple) {
+                SettingsCard(L10n.tr("capture.card_smart"), icon: "sparkle.magnifyingglass", iconColor: .teal) {
                     VStack(spacing: 10) {
-                        SettingsRow("智能标题生成 (Smart Title)", subtitle: "自动识别代码签名、SQL、CLI命令、Markdown标题及OCR文本，展示更具辨识度的标题") {
+                        SettingsRow(L10n.tr("capture.smart_title"), subtitle: L10n.tr("capture.smart_title_sub")) {
                             Toggle("", isOn: $settings.smartTitleEnabled)
                                 .toggleStyle(.switch)
                         }
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("图片文字识别 (Vision OCR)", subtitle: "复制或截取图片入库时，自动提取图中文本建立索引，图片亦可搜") {
+                        SettingsRow(L10n.tr("capture.ocr"), subtitle: L10n.tr("capture.ocr_sub")) {
                             Toggle("", isOn: $settings.imageOCREnabled)
                                 .toggleStyle(.switch)
                         }
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("网页链接元数据解析", subtitle: "后台轻量解析复制的 URL 页面标题与图标，列表显示更直观") {
+                        SettingsRow(L10n.tr("capture.link_metadata"), subtitle: L10n.tr("capture.link_metadata_sub")) {
                             Toggle("", isOn: $settings.fetchLinkMetadata)
                                 .toggleStyle(.switch)
                         }
@@ -830,18 +938,18 @@ private struct CaptureTab: View {
 
 
                 // 卡片 3: 检索引擎
-                SettingsCard("数据库与检索引擎", icon: "cylinder.split.1x2", iconColor: .green) {
+                SettingsCard(L10n.tr("capture.card_db"), icon: "cylinder.split.1x2", iconColor: .green) {
                     HStack(spacing: 10) {
                         Image(systemName: store.supportsFullTextSearch ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
                             .font(.system(size: 20))
                             .foregroundStyle(store.supportsFullTextSearch ? Color.green : Color.orange)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(store.supportsFullTextSearch ? "SQLite FTS5 全文检索引擎已就绪" : "系统 SQLite 不支持 FTS5，已降级为 LIKE 检索")
+                            Text(store.supportsFullTextSearch ? L10n.tr("capture.fts_ready") : L10n.tr("capture.fts_fallback"))
                                 .font(.system(size: 12.5, weight: .medium))
                             Text(store.supportsFullTextSearch
-                                 ? "支持中文精准分词、倒排索引与毫秒级高亮检索。"
-                                 : "基础模糊查询可用，但海量数据下检索耗时略有增加。")
+                                 ? L10n.tr("capture.fts_ready_sub")
+                                 : L10n.tr("capture.fts_fallback_sub"))
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
@@ -865,16 +973,16 @@ private struct PrivacyTab: View {
         ScrollView {
             VStack(spacing: 14) {
                 // 卡片 1: 忽略名单
-                SettingsCard("忽略应用名单（黑名单）", icon: "hand.raised.fill", iconColor: .orange) {
+                SettingsCard(L10n.tr("privacy.card_blacklist"), icon: "hand.raised.fill", iconColor: .orange) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("当以下应用处于前台运行激活状态时，所有复制的内容均不会被记录：")
+                        Text(L10n.tr("privacy.blacklist_desc"))
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
 
                         if settings.excludedApps.isEmpty {
                             HStack {
                                 Spacer()
-                                Text("当前未添加任何忽略应用")
+                                Text(L10n.tr("privacy.empty_blacklist"))
                                     .font(.system(size: 11))
                                     .foregroundStyle(.tertiary)
                                 Spacer()
@@ -909,11 +1017,11 @@ private struct PrivacyTab: View {
                         Divider().overlay(Color.primary.opacity(0.04))
 
                         HStack(spacing: 8) {
-                            TextField("输入应用 Bundle ID（如：com.1password.mac）", text: $newBundleID)
+                            TextField(L10n.tr("privacy.input_placeholder"), text: $newBundleID)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11.5, design: .monospaced))
 
-                            Button("添加") {
+                            Button(L10n.tr("action.add")) {
                                 let id = newBundleID.trimmingCharacters(in: .whitespaces)
                                 if !id.isEmpty, !settings.excludedApps.contains(id) {
                                     settings.excludedApps.append(id)
@@ -922,7 +1030,7 @@ private struct PrivacyTab: View {
                             }
                             .disabled(newBundleID.trimmingCharacters(in: .whitespaces).isEmpty)
 
-                            Button("一键添加前台应用") {
+                            Button(L10n.tr("privacy.add_frontmost")) {
                                 if let app = frontApps.lastNonSelfApp,
                                    let bundle = app.bundleIdentifier,
                                    !settings.excludedApps.contains(bundle) {
@@ -934,9 +1042,9 @@ private struct PrivacyTab: View {
                 }
 
                 // 卡片 2: 采集与临时状态
-                SettingsCard("采集安全与临时暂停", icon: "lock.shield.fill", iconColor: .green) {
+                SettingsCard(L10n.tr("privacy.card_security"), icon: "lock.shield.fill", iconColor: .green) {
                     VStack(spacing: 10) {
-                        SettingsRow("临时暂停采集", subtitle: "使用密码管理器或处理高密敏感内容时可临时关闭采集") {
+                        SettingsRow(L10n.tr("privacy.pause"), subtitle: L10n.tr("privacy.pause_sub")) {
                             Toggle("", isOn: $settings.pauseCapture)
                                 .toggleStyle(.switch)
                         }
@@ -947,7 +1055,7 @@ private struct PrivacyTab: View {
                             Image(systemName: "info.circle.fill")
                                 .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
-                            Text("系统安全自适应：当检测到密码输入框（NSSecureTextField / Concealed）或屏幕锁定状态时，ClipMate 会全自动静默停止采集，无需手动干预。")
+                            Text(L10n.tr("privacy.security_note"))
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
@@ -975,16 +1083,16 @@ private struct AITab: View {
         ScrollView {
             VStack(spacing: 14) {
                 // 卡片 1: 智能特性开关
-                SettingsCard("AI 核心特性", icon: "sparkles", iconColor: .purple) {
+                SettingsCard(L10n.tr("ai.card_core"), icon: "sparkles", iconColor: .indigo) {
                     VStack(spacing: 10) {
-                        SettingsRow("启用 AI 智能操作", subtitle: "在主面板中选中条目后按 ⌘K 唤起工作台，进行快速润色、总结与问答") {
+                        SettingsRow(L10n.tr("ai.enable"), subtitle: L10n.tr("ai.enable_sub")) {
                             Toggle("", isOn: $settings.aiEnabled)
                                 .toggleStyle(.switch)
                         }
 
                         Divider().overlay(Color.primary.opacity(0.04))
 
-                        SettingsRow("本地语义向量检索", subtitle: "利用 macOS 本地句向量按语义理解检索历史，无网络请求与隐私泄露") {
+                        SettingsRow(L10n.tr("ai.semantic"), subtitle: L10n.tr("ai.semantic_sub")) {
                             Toggle("", isOn: $settings.semanticSearchEnabled)
                                 .toggleStyle(.switch)
                                 .disabled(!EmbeddingService.isAvailable)
@@ -994,7 +1102,7 @@ private struct AITab: View {
                             HStack {
                                 Image(systemName: "exclamationmark.circle")
                                     .foregroundStyle(.orange)
-                                Text("当前系统未提供句向量资源，语义搜索不可用（不影响关键词检索）")
+                                Text(L10n.tr("ai.semantic_unavailable"))
                                     .font(.system(size: 10.5))
                                     .foregroundStyle(.secondary)
                             }
@@ -1003,37 +1111,37 @@ private struct AITab: View {
                 }
 
                 // 卡片 2: API 与模型配置
-                SettingsCard("模型服务与 API 配置", icon: "server.rack", iconColor: .blue) {
+                SettingsCard(L10n.tr("ai.card_model"), icon: "server.rack", iconColor: .blue) {
                     VStack(alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("API 端点（兼容 OpenAI / Ollama / DeepSeek / 本地服务）")
+                            Text(L10n.tr("ai.endpoint"))
                                 .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(.secondary)
-                            TextField("https://api.openai.com/v1 或 http://localhost:11434/v1", text: $settings.aiEndpoint)
+                            TextField(L10n.tr("ai.endpoint_placeholder"), text: $settings.aiEndpoint)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 12))
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("模型名称")
+                            Text(L10n.tr("ai.model_name"))
                                 .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(.secondary)
-                            TextField("如：gpt-4o-mini / deepseek-chat / qwen2.5:7b", text: $settings.aiModel)
+                            TextField(L10n.tr("ai.model_placeholder"), text: $settings.aiModel)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 12))
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("API 密钥（安全存储于本地系统钥匙串 Keychain；本地服务可留空）")
+                            Text(L10n.tr("ai.api_key"))
                                 .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(.secondary)
                             HStack(spacing: 8) {
                                 SecureField("sk-…", text: $apiKeyDraft)
                                     .textFieldStyle(.roundedBorder)
                                     .font(.system(size: 12))
-                                Button("保存密钥") {
+                                Button(L10n.tr("ai.save_key")) {
                                     settings.aiAPIKey = apiKeyDraft
-                                    testResult = "密钥已保存至本地钥匙串"
+                                    testResult = L10n.tr("ai.key_saved")
                                     HapticHelper.feedback()
                                 }
                                 .disabled(apiKeyDraft.isEmpty)
@@ -1041,7 +1149,7 @@ private struct AITab: View {
                         }
 
                         HStack(spacing: 8) {
-                            Button("测试连接") {
+                            Button(L10n.tr("ai.test_connection")) {
                                 testing = true
                                 Task { @MainActor in
                                     testResult = await ai.testConnection()
@@ -1060,11 +1168,11 @@ private struct AITab: View {
 
                 // 卡片 3: 提示词模板库
                 SettingsCard(
-                    "自定义提示词模板",
+                    L10n.tr("ai.card_prompts"),
                     icon: "text.badge.plus",
                     iconColor: .indigo,
                     trailing: {
-                        Button("恢复精选模板") {
+                        Button(L10n.tr("ai.reset_prompts")) {
                             settings.customPrompts = PromptTemplate.defaults
                             HapticHelper.feedback()
                         }
@@ -1072,7 +1180,7 @@ private struct AITab: View {
                     }
                 ) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("支持在提示词中包含 {content} 变量，执行时将自动替换为剪贴板选中的正文。")
+                        Text(L10n.tr("ai.prompt_var_note"))
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
 
@@ -1104,14 +1212,14 @@ private struct AITab: View {
                         Divider().overlay(Color.primary.opacity(0.04))
 
                         HStack(spacing: 8) {
-                            TextField("模板名（如：代码转TS）", text: $newPromptName)
+                            TextField(L10n.tr("ai.prompt_name_placeholder"), text: $newPromptName)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11))
                                 .frame(width: 140)
-                            TextField("提示词内容（包含 {content} 占位变量）", text: $newPromptTemplate)
+                            TextField(L10n.tr("ai.prompt_content_placeholder"), text: $newPromptTemplate)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11))
-                            Button("添加") {
+                            Button(L10n.tr("action.add")) {
                                 let n = newPromptName.trimmingCharacters(in: .whitespaces)
                                 let t = newPromptTemplate.trimmingCharacters(in: .whitespaces)
                                 guard !n.isEmpty, !t.isEmpty else { return }
@@ -1134,99 +1242,341 @@ private struct AITab: View {
 
 // MARK: - 脚本 Tab
 
+private struct PresetItemView: View {
+    let preset: ScriptAction
+    let isAdded: Bool
+    let appLanguage: AppLanguage
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: preset.icon)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isAdded ? Color.secondary : Color.orange)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 6).fill((isAdded ? Color.primary : Color.orange).opacity(0.08)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.scriptName(preset, lang: appLanguage))
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(isAdded ? .secondary : .primary)
+                    .lineLimit(1)
+                Text(L10n.scriptPresetDesc(preset.id, lang: appLanguage))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+
+            if isAdded {
+                Text(L10n.tr("scripts.preset_added"))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+            } else {
+                Button(action: onAdd) {
+                    Text(L10n.tr("scripts.add_preset"))
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.orange.opacity(0.15)))
+                        .foregroundStyle(Color.orange)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(isAdded ? 0.015 : 0.035)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+    }
+}
+
+private struct ConfiguredScriptRow: View {
+    let script: ScriptAction
+    let index: Int
+    let totalCount: Int
+    let appLanguage: AppLanguage
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: script.type == .shortcut ? "bolt.horizontal.fill" : script.icon)
+                .font(.system(size: 12))
+                .foregroundStyle(script.type == .shortcut ? Color.purple : Color.teal)
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6).fill((script.type == .shortcut ? Color.purple : Color.teal).opacity(0.12)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(L10n.scriptName(script, lang: appLanguage))
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(script.type == .shortcut ? "Shortcuts" : "Shell")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill((script.type == .shortcut ? Color.purple : Color.teal).opacity(0.12)))
+                        .foregroundStyle(script.type == .shortcut ? Color.purple : Color.teal)
+                }
+                Text(script.command)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            HStack(spacing: 2) {
+                Button(action: onMoveUp) {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.secondary.opacity(index > 0 ? 0.8 : 0.25))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(index == 0)
+
+                Button(action: onMoveDown) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.secondary.opacity(index < totalCount - 1 ? 0.8 : 0.25))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(index >= totalCount - 1)
+            }
+
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red.opacity(0.8))
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+    }
+}
+
 private struct ScriptsTab: View {
     @ObservedObject var settings: AppSettings
     @State private var newName = ""
     @State private var newCommand = ""
+    @State private var newType: ScriptType = .shell
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
-                // 卡片 1: 安全规范说明
-                SettingsCard("脚本动作规范", icon: "shield.checkered", iconColor: .blue) {
-                    Text("自定义脚本将在主面板 ⌘K 智能操作浮层中列出。选中的剪贴板文本经标准输入（stdin）传入命令，命令的标准输出（stdout）作为最终结果。所有脚本均以当前登录用户权限执行，请勿配置未知来源的不可信命令。")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                }
-
-                // 卡片 2: 已配置脚本
-                SettingsCard("已配置的终端处理脚本", icon: "terminal.fill", iconColor: .green) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if settings.customScripts.isEmpty {
-                            HStack {
-                                Spacer()
-                                Text("尚未添加自定义脚本")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.tertiary)
-                                Spacer()
-                            }
-                            .padding(.vertical, 6)
-                        } else {
-                            VStack(spacing: 6) {
-                                ForEach(settings.customScripts) { script in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack {
-                                            Text(script.name)
-                                                .font(.system(size: 12, weight: .semibold))
-                                            Spacer()
-                                            Button {
-                                                settings.customScripts.removeAll { $0.id == script.id }
-                                            } label: {
-                                                Image(systemName: "minus.circle.fill")
-                                                    .font(.system(size: 13))
-                                                    .foregroundStyle(.red.opacity(0.8))
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
-                                        Text(script.command)
-                                            .font(.system(size: 10.5, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                    .padding(8)
-                                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.03)))
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 卡片 3: 新增脚本
-                SettingsCard("添加新脚本", icon: "plus.circle.fill", iconColor: .purple) {
-                    VStack(spacing: 8) {
-                        TextField("脚本显示名称，如：提取邮箱 / 格式化JSON", text: $newName)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12))
-                        TextField("Shell 命令，如：grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+' | sort -u", text: $newCommand)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 11, design: .monospaced))
-                        HStack {
-                            Spacer()
-                            Button("添加脚本") {
-                                let name = newName.trimmingCharacters(in: .whitespaces)
-                                let command = newCommand.trimmingCharacters(in: .whitespaces)
-                                guard !name.isEmpty, !command.isEmpty else { return }
-                                settings.customScripts.append(ScriptAction(name: name, command: command))
-                                newName = ""
-                                newCommand = ""
-                                HapticHelper.feedback()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty
-                                      || newCommand.trimmingCharacters(in: .whitespaces).isEmpty)
-                        }
-                    }
-                }
+                presetLibraryCard
+                configuredScriptsCard
+                addCustomActionCard
+                specExplanationCard
             }
             .padding(16)
         }
         .modernScrollbar()
+    }
+
+    private var presetLibraryCard: some View {
+        SettingsCard(
+            L10n.tr("scripts.card_presets"),
+            icon: "sparkles.rectangle.stack.fill",
+            iconColor: .orange,
+            trailing: {
+                HStack(spacing: 8) {
+                    Button {
+                        for preset in ScriptAction.presetLibrary {
+                            if !settings.customScripts.contains(where: { $0.id == preset.id || $0.command == preset.command }) {
+                                settings.customScripts.append(preset)
+                            }
+                        }
+                        HapticHelper.feedback()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus.circle.fill")
+                            Text(L10n.tr("scripts.add_all_presets"))
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.orange.opacity(0.12)))
+                    .foregroundStyle(Color.orange)
+
+                    Button {
+                        settings.customScripts = ScriptAction.defaultPresets
+                        HapticHelper.feedback()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text(L10n.tr("scripts.reset_presets"))
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+                    .foregroundStyle(.secondary)
+                }
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.tr("scripts.preset_desc"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(ScriptAction.presetLibrary) { preset in
+                        let isAdded = settings.customScripts.contains(where: { $0.id == preset.id || $0.command == preset.command })
+                        PresetItemView(
+                            preset: preset,
+                            isAdded: isAdded,
+                            appLanguage: settings.appLanguage
+                        ) {
+                            settings.customScripts.append(preset)
+                            HapticHelper.feedback()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var configuredScriptsCard: some View {
+        SettingsCard(L10n.tr("scripts.card_list"), icon: "terminal.fill", iconColor: .teal) {
+            VStack(alignment: .leading, spacing: 8) {
+                if settings.customScripts.isEmpty {
+                    HStack {
+                        Spacer()
+                        Text(L10n.tr("scripts.empty"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                } else {
+                    VStack(spacing: 6) {
+                        ForEach(Array(settings.customScripts.enumerated()), id: \.element.id) { index, script in
+                            ConfiguredScriptRow(
+                                script: script,
+                                index: index,
+                                totalCount: settings.customScripts.count,
+                                appLanguage: settings.appLanguage,
+                                onMoveUp: {
+                                    guard index > 0 else { return }
+                                    settings.customScripts.swapAt(index, index - 1)
+                                    HapticHelper.feedback()
+                                },
+                                onMoveDown: {
+                                    guard index < settings.customScripts.count - 1 else { return }
+                                    settings.customScripts.swapAt(index, index + 1)
+                                    HapticHelper.feedback()
+                                },
+                                onDelete: {
+                                    settings.customScripts.removeAll { $0.id == script.id }
+                                    HapticHelper.feedback()
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var addCustomActionCard: some View {
+        SettingsCard(L10n.tr("scripts.card_add"), icon: "plus.circle.fill", iconColor: .blue) {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker(L10n.tr("scripts.type_label"), selection: $newType) {
+                    Text(L10n.tr("scripts.type_shell")).tag(ScriptType.shell)
+                    Text(L10n.tr("scripts.type_shortcut")).tag(ScriptType.shortcut)
+                }
+                .pickerStyle(.segmented)
+
+                TextField(L10n.tr("scripts.name_placeholder"), text: $newName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+
+                TextField(newType == .shortcut ? L10n.tr("scripts.shortcut_placeholder") : L10n.tr("scripts.command_placeholder"), text: $newCommand)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+
+                HStack {
+                    Text(newType == .shortcut ? "macOS /usr/bin/shortcuts run <name>" : "/bin/sh -c <command>")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button {
+                        let name = newName.trimmingCharacters(in: .whitespaces)
+                        let command = newCommand.trimmingCharacters(in: .whitespaces)
+                        guard !name.isEmpty, !command.isEmpty else { return }
+                        let icon = (newType == .shortcut) ? "bolt.horizontal.fill" : "terminal"
+                        settings.customScripts.append(ScriptAction(name: name, command: command, type: newType, icon: icon))
+                        newName = ""
+                        newCommand = ""
+                        HapticHelper.feedback()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                            Text(L10n.tr("scripts.add_button"))
+                        }
+                        .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty
+                              || newCommand.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    private var specExplanationCard: some View {
+        SettingsCard(L10n.tr("scripts.card_spec"), icon: "shield.checkered", iconColor: .secondary) {
+            Text(L10n.tr("scripts.spec_desc"))
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
 // MARK: - 关于 Tab
 
 private struct AboutTab: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject private var updateManager = UpdateManager.shared
+
+    private var updateStatusText: String {
+        switch updateManager.state {
+        case .idle:
+            return ""
+        case .checking:
+            return L10n.tr("update.checking")
+        case .upToDate(let version):
+            return L10n.tr("update.up_to_date", version)
+        case .available(let version, _, _):
+            return L10n.tr("update.available", version)
+        case .failed:
+            return L10n.tr("update.failed")
+        }
+    }
+
+    private var statusColor: Color {
+        switch updateManager.state {
+        case .available: return .green
+        case .failed: return .red
+        default: return .secondary
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -1247,30 +1597,80 @@ private struct AboutTab: View {
                     Text("ClipMate")
                         .font(.system(size: 22, weight: .bold))
 
-                    Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0")（macOS 原生架构）")
+                    Text(L10n.tr("about.version", updateManager.currentVersion))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
                 .padding(.top, 8)
 
-                // 卡片 1: 核心设计哲学
-                SettingsCard("原生设计与极致体验", icon: "cpu", iconColor: .blue) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        featureBullet(title: "100% 纯原生架构", desc: "完全基于 Swift & SwiftUI 原生构筑，零 Electron，极致内存轻量常驻。")
-                        featureBullet(title: "毛玻璃与现代视觉", desc: "统一 Liquid Glass 设计语言，自适应 macOS 浅色与深色外观。")
-                        featureBullet(title: "本地 SQLite 事务引擎", desc: "采用 SQLite FTS5 倒排索引，海量历史瞬间模糊匹配与高亮。")
-                        featureBullet(title: "AI 智能原生融合", desc: "内置本地句向量语义检索与多模型工作台，对话与润色行云流水。")
+                // 卡片 1: 版本与软件更新
+                SettingsCard(L10n.tr("update.card_title"), icon: "arrow.triangle.2.circlepath.circle.fill", iconColor: .blue) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(L10n.tr("update.current_version", updateManager.currentVersion, updateManager.currentBuild))
+                                    .font(.system(size: 12, weight: .medium))
+                                if !updateStatusText.isEmpty {
+                                    Text(updateStatusText)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(statusColor)
+                                }
+                            }
+                            Spacer()
+
+                            if updateManager.isChecking {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else if case .available = updateManager.state {
+                                Button {
+                                    updateManager.openDownloadPage()
+                                } label: {
+                                    Label(L10n.tr("update.download"), systemImage: "arrow.down.circle.fill")
+                                }
+                                .clipMateAccent(size: .small)
+                            } else {
+                                Button {
+                                    updateManager.checkForUpdates(settings: settings, manual: true)
+                                } label: {
+                                    Text(L10n.tr("update.check_now"))
+                                }
+                                .clipMateGlass(size: .small)
+                            }
+                        }
+
+                        Divider().overlay(Color.primary.opacity(0.06))
+
+                        Toggle(isOn: $settings.autoCheckUpdates) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L10n.tr("update.auto_check"))
+                                    .font(.system(size: 12))
+                                Text(L10n.tr("update.auto_check_sub"))
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
                     }
                 }
 
-                // 卡片 2: 本地安全与隐私保证
-                SettingsCard("隐私与数据安全", icon: "lock.fill", iconColor: .green) {
+                // 卡片 2: 核心设计哲学
+                SettingsCard(L10n.tr("about.card_arch"), icon: "cpu", iconColor: .indigo) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        featureBullet(title: L10n.tr("about.arch_bullet1_title"), desc: L10n.tr("about.arch_bullet1_desc"))
+                        featureBullet(title: L10n.tr("about.arch_bullet2_title"), desc: L10n.tr("about.arch_bullet2_desc"))
+                        featureBullet(title: L10n.tr("about.arch_bullet3_title"), desc: L10n.tr("about.arch_bullet3_desc"))
+                        featureBullet(title: L10n.tr("about.arch_bullet4_title"), desc: L10n.tr("about.arch_bullet4_desc"))
+                    }
+                }
+
+                // 卡片 3: 本地安全与隐私保证
+                SettingsCard(L10n.tr("about.card_privacy"), icon: "lock.fill", iconColor: .green) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top, spacing: 6) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                                 .font(.system(size: 12))
-                            Text("100% 本地存储：所有剪贴板历史与图片全部保存在本机 SQLite 数据库，绝无任何网络上报。")
+                            Text(L10n.tr("about.privacy_bullet1"))
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(.secondary)
                         }
@@ -1278,7 +1678,7 @@ private struct AboutTab: View {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                                 .font(.system(size: 12))
-                            Text("系统安全自适应：密码框（Concealed Type）与锁屏状态下全自动静默停止采集。")
+                            Text(L10n.tr("about.privacy_bullet2"))
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(.secondary)
                         }
@@ -1286,14 +1686,14 @@ private struct AboutTab: View {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                                 .font(.system(size: 12))
-                            Text("辅助功能权限：仅用于通过模拟按键完成选中文本的原生自动粘贴回写。")
+                            Text(L10n.tr("about.privacy_bullet3"))
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
 
-                Text("Copyright © 2026 ClipMate. Designed for macOS.")
+                Text(L10n.tr("about.copyright"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
                     .padding(.bottom, 8)

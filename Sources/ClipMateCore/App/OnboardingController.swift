@@ -23,7 +23,7 @@ final class OnboardingController {
                 backing: .buffered,
                 defer: false
             )
-            newWindow.title = "欢迎使用 ClipMate"
+            newWindow.title = L10n.tr("onboarding.window_title")
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
             newWindow.contentView = NSHostingView(
@@ -55,29 +55,29 @@ struct OnboardingView: View {
                 .frame(width: 76, height: 76)
                 .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
             VStack(spacing: 4) {
-                Text("欢迎使用 ClipMate")
+                Text(L10n.tr("onboarding.title"))
                     .font(.system(size: 20, weight: .bold))
-                Text("原生的剪贴板历史工具 — 快速、本地、隐私优先")
+                Text(L10n.tr("onboarding.subtitle"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 10) {
                 featureCard(icon: "keyboard", tint: Palette.text,
-                            title: "\(hotkeyDisplay) 唤起",
-                            desc: "⏎ 粘贴 · ⌘⏎ 复制\n⌘K AI · ⇧⏎ 入队连贴")
+                            title: L10n.tr("onboarding.card1_title", hotkeyDisplay),
+                            desc: L10n.tr("onboarding.card1_desc"))
                 featureCard(icon: "lock.shield", tint: Palette.url,
-                            title: "隐私默认安全",
-                            desc: "全本地存储 · 无上报\n密码管理器自动排除")
+                            title: L10n.tr("onboarding.card2_title"),
+                            desc: L10n.tr("onboarding.card2_desc"))
                 featureCard(icon: "sparkles", tint: Palette.richText,
-                            title: "AI 与语义搜索",
-                            desc: "翻译/摘要 · 按含义搜历史\n图片文字识别 · 自定义脚本")
+                            title: L10n.tr("onboarding.card3_title"),
+                            desc: L10n.tr("onboarding.card3_desc"))
             }
-            Text("粘贴回写需要「辅助功能」权限：仅用于替你按一次 ⌘V，不读取屏幕内容，可随时在系统设置中关闭。")
+            Text(L10n.tr("onboarding.accessibility_notice"))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
-            Button("开始使用") { onFinish() }
+            Button(L10n.tr("onboarding.start")) { onFinish() }
                 .keyboardShortcut(.defaultAction)
                 .controlSize(.large)
                 .padding(.top, 2)

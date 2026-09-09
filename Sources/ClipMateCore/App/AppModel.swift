@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import UniformTypeIdentifiers
 
 /// 组装根：初始化各服务并接线。
@@ -13,35 +14,28 @@ final class AppModel {
     let panel: PanelController
     let menuBar: MenuBarController
     let settingsWindow: SettingsWindowController
-    let embeddingBackfill: EmbeddingBackfill?
-    private(set) var aiWorkspace: AIWorkspaceController!
+    private(set) var embeddingBackfill: EmbeddingBackfill?
     private let onboarding: OnboardingController
 
     private var hotkeyObserver: NSObjectProtocol?
     private var retentionTimer: Timer?
+    private var semanticObserver: AnyCancellable?
+    private let baseURL: URL
 
     init() throws {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ClipMate", isDirectory: true)
+        baseURL = base
         blobStore = BlobStore(directory: base.appendingPathComponent("blobs"))
         settings = AppSettings()
         let database = try Database(url: base.appendingPathComponent("clipmate.sqlite"))
         // 语义搜索开关：开启且系统具备句向量能力时挂载向量生成器
-        let embeddingProvider: ((String) -> Data?)? = settings.semanticSearchEnabled && EmbeddingService.isAvailable
-            ? { EmbeddingService.embed(text: $0) }
-            : nil
-        let mainStore = try ClipStore(database: database, blobStore: blobStore, embeddingProvider: embeddingProvider)
-        store = mainStore
-        if embeddingProvider != nil {
-            // 补算使用独立数据库连接：WAL 多连接下后台写入不阻塞主线程查询
-            let backfillDatabase = try Database(url: base.appendingPathComponent("clipmate.sqlite"))
-            let backfillStore = try ClipStore(database: backfillDatabase, blobStore: blobStore)
-            embeddingBackfill = EmbeddingBackfill(store: backfillStore) { [weak mainStore] in
-                mainStore?.invalidateEmbeddingCache()
-            }
-        } else {
-            embeddingBackfill = nil
-        }
+        let embeddingEnabled = settings.semanticSearchEnabled && EmbeddingService.isAvailable
+        store = try ClipStore(
+            database: database,
+            blobStore: blobStore,
+            embeddingProvider: embeddingEnabled ? { EmbeddingService.embed(text: $0) } : nil
+        )
         ai = AIService(settings: settings)
         monitor = ClipboardMonitor(settings: settings, store: store)
         frontApps = FrontAppTracker()
@@ -50,13 +44,43 @@ final class AppModel {
         settingsWindow = SettingsWindowController(settings: settings, store: store, ai: ai, frontApps: frontApps)
         menuBar = MenuBarController(settings: settings, store: store)
         onboarding = OnboardingController(settings: settings)
-        aiWorkspace = AIWorkspaceController(ai: ai, store: store, monitor: monitor, settings: settings)
-        aiWorkspace.model.pasteTargetProvider = { [weak self] in self?.panel.viewModel.pasteTarget }
-        aiWorkspace.model.hidePanel = { [weak self] in self?.panel.hidePanel() }
-        aiWorkspace.mainFrameProvider = { [weak self] in self?.panel.panel.frame }
-        aiWorkspace.onClosed = { [weak self] in self?.panel.reassertKey() }
-        panel.aiWorkspace = aiWorkspace
-        panel.viewModel.aiWorkspace = aiWorkspace
+
+        if embeddingEnabled {
+            configureEmbeddingBackfill()
+        }
+        // 语义搜索开关即时生效：运行中切换会重建/拆除向量生成器与后台补算
+        semanticObserver = settings.$semanticSearchEnabled
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconfigureSemanticSearch() }
+    }
+
+    /// 挂载后台向量补算：独立数据库连接（WAL 多连接），避免补算写入与主线程查询争抢。
+    private func configureEmbeddingBackfill() {
+        guard embeddingBackfill == nil else { return }
+        do {
+            let database = try Database(url: baseURL.appendingPathComponent("clipmate.sqlite"))
+            let backfillStore = try ClipStore(database: database, blobStore: blobStore)
+            embeddingBackfill = EmbeddingBackfill(store: backfillStore) { [weak self] in
+                self?.store.invalidateEmbeddingCache()
+            }
+        } catch {
+            embeddingBackfill = nil
+        }
+    }
+
+    /// 语义检索开关：开启则挂载生成器并补算存量，关闭则卸载（已算好的向量保留在库中）。
+    private func reconfigureSemanticSearch() {
+        let enabled = settings.semanticSearchEnabled && EmbeddingService.isAvailable
+        guard enabled != (embeddingBackfill != nil) else { return }
+        if enabled {
+            store.setEmbeddingProvider { EmbeddingService.embed(text: $0) }
+            configureEmbeddingBackfill()
+            embeddingBackfill?.backfillAll()
+        } else {
+            embeddingBackfill = nil
+            store.setEmbeddingProvider(nil)
+        }
     }
 
     func start() {
@@ -118,6 +142,8 @@ final class AppModel {
         embeddingBackfill?.backfillAll()
         // 首次启动引导（含辅助功能授权引导）
         onboarding.showIfNeeded()
+        // 自动检查更新（静默异步，距离上次检查 > 24h 时触发）
+        UpdateManager.shared.checkOnLaunch(settings: settings)
     }
 
     private func applyHotkey() {
