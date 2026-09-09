@@ -73,6 +73,13 @@ enum Migrations {
             }
             try db.execute("PRAGMA user_version = 3;")
         }
+
+        // v4：号码归一化键（同一号码的不同分隔符写法视为同一条，避免历史里散落多份）
+        if db.userVersion < 4, !columnExists(db, table: "clip", column: "num_key") {
+            try? db.execute("ALTER TABLE clip ADD COLUMN num_key TEXT")
+            try? db.execute("CREATE INDEX IF NOT EXISTS idx_clip_num ON clip(num_key)")
+            try db.execute("PRAGMA user_version = 4;")
+        }
     }
 
     private static func columnExists(_ db: Database, table: String, column: String) -> Bool {

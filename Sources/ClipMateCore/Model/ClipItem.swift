@@ -24,6 +24,11 @@ public struct ClipItem: Identifiable, Equatable, Sendable {
         tags.contains(FilterKind.snippetTag)
     }
 
+    /// 标题是否为用户手动标注（标注后不再被智能标题 / OCR / 链接标题覆盖）。
+    public var isUserTitled: Bool {
+        meta[ClipStore.userTitleKey] == "1"
+    }
+
     public var snippetGroup: String? {
         meta["snippet_group"]
     }
@@ -93,7 +98,7 @@ public struct ClipItem: Identifiable, Equatable, Sendable {
 
 /// 列表过滤维度（对应 UI 上的分类 chip）。
 public enum FilterKind: String, CaseIterable, Identifiable {
-    case all, text, image, file, link, snippet, pinned
+    case all, text, image, file, link, snippet, pinned, number
 
     public var id: String { rawValue }
 
@@ -106,6 +111,7 @@ public enum FilterKind: String, CaseIterable, Identifiable {
         case .link: return "link"
         case .snippet: return "bookmark"
         case .pinned: return "pin"
+        case .number: return "number"
         }
     }
 
@@ -120,7 +126,7 @@ public enum FilterKind: String, CaseIterable, Identifiable {
     /// 映射到 SQL 的 kind 过滤子句；nil 表示不过滤。
     var kindClause: String? {
         switch self {
-        case .all, .pinned, .snippet: return nil
+        case .all, .pinned, .snippet, .number: return nil
         case .text: return "kind IN ('text','richText','pdf')"
         case .image: return "kind = 'image'"
         case .file: return "kind = 'file'"
@@ -131,8 +137,13 @@ public enum FilterKind: String, CaseIterable, Identifiable {
     /// 非 kind 维度的附加 SQL 子句。
     var extraClause: String? {
         switch self {
-        case .snippet: return "tags LIKE '%\"\(FilterKind.snippetTag)\"%'"
-        default: return nil
+        case .snippet:
+            return "tags LIKE '%\"\(FilterKind.snippetTag)\"%'"
+        case .number:
+            let patterns = NumberKind.allTags.map { "tags LIKE '%\"\($0)\"%'" }
+            return "(" + patterns.joined(separator: " OR ") + ")"
+        default:
+            return nil
         }
     }
 }

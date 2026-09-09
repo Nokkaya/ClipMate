@@ -17,6 +17,10 @@ final class AppModel {
     private(set) var embeddingBackfill: EmbeddingBackfill?
     private let onboarding: OnboardingController
 
+    /// 自动标签规则版本：升级规则（如新增号码识别）后 +1，启动时回填存量条目。
+    private static let tagRulesVersionKey = "tagRulesVersion"
+    private static let currentTagRulesVersion = 1
+
     private var hotkeyObserver: NSObjectProtocol?
     private var retentionTimer: Timer?
     private var semanticObserver: AnyCancellable?
@@ -140,6 +144,20 @@ final class AppModel {
         }
         // 存量数据向量补算（后台，低优先级）
         embeddingBackfill?.backfillAll()
+        // 存量号码归一化键回填（迁移 v4 后一次性，后台执行）
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.store.backfillNumberKeys()
+        }
+        // 标签规则升级后回填存量条目的自动标签（如新增的号码识别）
+        if UserDefaults.standard.integer(forKey: Self.tagRulesVersionKey) < Self.currentTagRulesVersion {
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let updated = self?.store.backfillAutoTags() ?? 0
+                DispatchQueue.main.async {
+                    UserDefaults.standard.set(Self.currentTagRulesVersion, forKey: Self.tagRulesVersionKey)
+                    if updated > 0 { self?.panel.viewModel.reload() }
+                }
+            }
+        }
         // 首次启动引导（含辅助功能授权引导）
         onboarding.showIfNeeded()
         // 自动检查更新（静默异步，距离上次检查 > 24h 时触发）

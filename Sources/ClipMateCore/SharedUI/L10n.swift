@@ -52,6 +52,14 @@ public enum L10n {
         case "片段": return tr("tag.snippet", lang: lang)
         case "PDF": return tr("tag.pdf", lang: lang)
         case "JSON": return tr("tag.json", lang: lang)
+        case "手机号": return tr("tag.phone", lang: lang)
+        case "座机": return tr("tag.telephone", lang: lang)
+        case "银行卡": return tr("tag.bank_card", lang: lang)
+        case "身份证": return tr("tag.id_card", lang: lang)
+        case "快递单号": return tr("tag.tracking", lang: lang)
+        case "IP": return tr("tag.ip", lang: lang)
+        case "金额": return tr("tag.amount", lang: lang)
+        case "数字": return tr("tag.number", lang: lang)
         default: return tag
         }
     }
@@ -65,7 +73,12 @@ public enum L10n {
         case .link: return tr("filter.link", lang: lang)
         case .snippet: return tr("filter.snippet", lang: lang)
         case .pinned: return tr("filter.pinned", lang: lang)
+        case .number: return tr("filter.number", lang: lang)
         }
+    }
+
+    public static func timeTitle(_ time: TimeFilter, lang: AppLanguage? = nil) -> String {
+        tr("time.\(time.rawValue)", lang: lang)
     }
 
     public static func positionModeTitle(_ mode: PanelPositionMode, lang: AppLanguage? = nil) -> String {
@@ -239,7 +252,31 @@ public enum L10n {
         "action.remove_snippet": "移出片段",
         "action.save_snippet": "存为片段…",
         "action.edit_item": "编辑…",
+        "search.syntax_hint": "检索语法：\n#11 = 恰好 11 位数字 · #>8 / #<12 = 数字位数范围\nlen:>8 = 内容长度大于 8 · app:微信 = 来源应用\nbefore:昨天 / after:2026-09-01 = 时间范围 · 138* = 前缀匹配",
+        "filter.number": "号码",
+        "tag.phone": "手机号",
+        "tag.telephone": "座机",
+        "tag.bank_card": "银行卡",
+        "tag.id_card": "身份证",
+        "tag.tracking": "快递单号",
+        "tag.ip": "IP",
+        "tag.amount": "金额",
+        "tag.number": "数字",
+        "filter.all_sources": "所有来源",
+        "filter.clear_context": "清除来源与时间筛选",
+        "time.all": "全部时间",
+        "time.today": "今天",
+        "time.yesterday": "昨天",
+        "time.last3Days": "最近 3 天",
+        "time.thisWeek": "本周",
+        "time.thisMonth": "本月",
+        "action.rename": "重命名…",
+        "action.clear_title": "清除自定义标题",
         "action.preview": "详情预览",
+        "overlay.rename.title": "重命名条目",
+        "overlay.rename.subtitle": "给这条内容起个好记的名字，之后按名字就能搜到",
+        "overlay.rename.placeholder": "例如：招行卡号 / 公司座机 / 订单 2026-09",
+        "overlay.rename.clear": "清除标题",
         "action.queue_add": "加入粘贴队列",
         "action.queue_remove": "移出粘贴队列",
         "action.ai_actions": "AI 操作…",
@@ -686,7 +723,31 @@ public enum L10n {
         "action.remove_snippet": "Remove from Snippets",
         "action.save_snippet": "Save as Snippet…",
         "action.edit_item": "Edit…",
+        "search.syntax_hint": "Search syntax:\n#11 = exactly 11 digits · #>8 / #<12 = digit count range\nlen:>8 = content longer than 8 · app:Slack = source app\nbefore:yesterday / after:2026-09-01 = date range · 138* = prefix match",
+        "filter.number": "Numbers",
+        "tag.phone": "Phone",
+        "tag.telephone": "Landline",
+        "tag.bank_card": "Bank Card",
+        "tag.id_card": "ID Card",
+        "tag.tracking": "Tracking No.",
+        "tag.ip": "IP",
+        "tag.amount": "Amount",
+        "tag.number": "Number",
+        "filter.all_sources": "All Sources",
+        "filter.clear_context": "Clear source & time filters",
+        "time.all": "All Time",
+        "time.today": "Today",
+        "time.yesterday": "Yesterday",
+        "time.last3Days": "Last 3 Days",
+        "time.thisWeek": "This Week",
+        "time.thisMonth": "This Month",
+        "action.rename": "Rename…",
+        "action.clear_title": "Clear Custom Title",
         "action.preview": "Detail Preview",
+        "overlay.rename.title": "Rename Item",
+        "overlay.rename.subtitle": "Give this clip a memorable name so you can find it by name later",
+        "overlay.rename.placeholder": "e.g. Bank card number / Office phone / Order 2026-09",
+        "overlay.rename.clear": "Clear Title",
         "action.queue_add": "Add to Paste Queue",
         "action.queue_remove": "Remove from Paste Queue",
         "action.ai_actions": "AI Actions…",

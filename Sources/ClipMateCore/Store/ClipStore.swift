@@ -1,6 +1,72 @@
 import Foundation
 import CryptoKit
 
+/// 时间范围过滤（情境回忆："我记得是昨天复制的"）。
+public enum TimeFilter: String, CaseIterable, Identifiable, Sendable {
+    case all, today, yesterday, last3Days, thisWeek, thisMonth
+
+    public var id: String { rawValue }
+
+    /// 起始时间；nil 表示不限。
+    public var since: Date? {
+        let cal = Calendar.current
+        let now = Date()
+        switch self {
+        case .all: return nil
+        case .today: return cal.startOfDay(for: now)
+        case .yesterday: return cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now))
+        case .last3Days: return cal.date(byAdding: .day, value: -2, to: cal.startOfDay(for: now))
+        case .thisWeek: return cal.dateInterval(of: .weekOfYear, for: now)?.start
+        case .thisMonth: return cal.dateInterval(of: .month, for: now)?.start
+        }
+    }
+
+    /// 结束时间（仅"昨天"需要上界）；nil 表示不限。
+    public var until: Date? {
+        switch self {
+        case .yesterday: return Calendar.current.startOfDay(for: Date())
+        default: return nil
+        }
+    }
+}
+
+/// 情境过滤：来源应用 + 时间范围。
+public struct ContextFilter: Equatable, Sendable {
+    public var sourceBundle: String?
+    public var since: Date?
+    public var until: Date?
+
+    public init(sourceBundle: String? = nil, since: Date? = nil, until: Date? = nil) {
+        self.sourceBundle = sourceBundle
+        self.since = since
+        self.until = until
+    }
+
+    public var isActive: Bool {
+        sourceBundle != nil || since != nil || until != nil
+    }
+
+    public init(time: TimeFilter, sourceBundle: String?) {
+        self.sourceBundle = sourceBundle
+        self.since = time.since
+        self.until = time.until
+    }
+}
+
+/// 来源应用聚合项（供筛选菜单展示）。
+public struct ClipSource: Identifiable, Equatable, Sendable {
+    public let bundle: String
+    public let name: String
+    public let count: Int
+    public var id: String { bundle }
+
+    public init(bundle: String, name: String, count: Int) {
+        self.bundle = bundle
+        self.name = name
+        self.count = count
+    }
+}
+
 /// 历史存储：SQLite（去重合并、FTS5/LIKE 检索、语义向量混合排序、固定、保留策略、大对象落盘、导入导出）。
 public final class ClipStore {
     private let db: Database
@@ -104,21 +170,36 @@ public final class ClipStore {
         let timestamp = (createdAt ?? Date()).timeIntervalSince1970
         let now = Date().timeIntervalSince1970
 
+        // 号码归一化键：同一号码的不同分隔符写法（138 1234 5678 / 138-1234-5678）归并为同一条
+        let numberKey = NumberRecognizer.normalize(plainText)
+
         let dup = try db.prepare("SELECT id FROM clip WHERE content_hash = ? LIMIT 1")
         dup.bind([.blob(hashData)])
-        let existingID: Int64? = dup.step() ? dup.columnInt(0) : nil
+        var existingID: Int64? = dup.step() ? dup.columnInt(0) : nil
+
+        if existingID == nil, let key = numberKey {
+            let dupNumber = try db.prepare("SELECT id FROM clip WHERE num_key = ? LIMIT 1")
+            dupNumber.bind([.text(key)])
+            existingID = dupNumber.step() ? dupNumber.columnInt(0) : nil
+        }
 
         if let id = existingID {
+            // 合并最新自动标签：旧条目可能在标签规则升级前入库，重新复制时补齐
+            var mergedTags = tags
+            if !tags.isEmpty, let existing = item(id: id) {
+                mergedTags = existing.tags + tags.filter { !existing.tags.contains($0) }
+            }
             let update = try db.prepare("""
                 UPDATE clip SET kind = ?, plain_text = ?, source_bundle = ?, source_name = ?,
                     byte_size = ?, created_at = ?, last_used_at = ?, use_count = use_count + 1,
-                    inline_data = ?, blob_name = ?, meta = ?
+                    inline_data = ?, blob_name = ?, meta = ?, num_key = ?, tags = ?
                 WHERE id = ?
                 """)
             update.bind([
                 .text(kind.rawValue), .text(plainText), .text(sourceBundle), .text(sourceName),
                 .int(Int64(content.count)), .double(timestamp), .double(now),
-                .blob(inlineData), .text(blobName), .text(json(meta)),
+                .blob(inlineData), .text(blobName), .text(json(meta)), .text(numberKey),
+                .text(json(mergedTags)),
                 .int(id),
             ])
             try update.run()
@@ -128,14 +209,14 @@ public final class ClipStore {
 
         let insert = try db.prepare("""
             INSERT INTO clip (kind, plain_text, source_bundle, source_name, content_hash, byte_size,
-                created_at, last_used_at, use_count, pinned, title, tags, meta, inline_data, blob_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)
+                created_at, last_used_at, use_count, pinned, title, tags, meta, inline_data, blob_name, num_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?)
             """)
         insert.bind([
             .text(kind.rawValue), .text(plainText), .text(sourceBundle), .text(sourceName),
             .blob(hashData), .int(Int64(content.count)), .double(timestamp), .double(timestamp),
             .text(title),
-            .text(json(tags)), .text(json(meta)), .blob(inlineData), .text(blobName),
+            .text(json(tags)), .text(json(meta)), .blob(inlineData), .text(blobName), .text(numberKey),
         ])
         try insert.run()
         guard let item = item(id: db.lastInsertRowID) else { throw StoreError.sql("插入后读取失败") }
@@ -147,17 +228,21 @@ public final class ClipStore {
 
     /// 检索：文本路径（FTS5 前缀/LIKE）+ 语义向量路径，RRF 混合排序。
     /// 拉丁文查询走 FTS5，含 CJK 的查询走 LIKE（系统 FTS5 默认分词器不切中文）。
-    public func search(query: String, filter: FilterKind = .all, snippetGroup: String? = nil, limit: Int = 300) -> [ClipItem] {
+    public func search(query: String, filter: FilterKind = .all, snippetGroup: String? = nil,
+                       context: ContextFilter = ContextFilter(), limit: Int = 300) -> [ClipItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            let textResults = try textSearch(trimmed, filter: filter, snippetGroup: snippetGroup, limit: limit)
-            guard !trimmed.isEmpty, !trimmed.hasPrefix("/"), let provider = embeddingProvider else { return textResults }
+            let textResults = try textSearch(trimmed, filter: filter, snippetGroup: snippetGroup, context: context, limit: limit)
+
+            // 语义检索只吃普通关键词（结构化条件如 #11 / app:微信 不参与向量召回）
+            let semanticQuery = SearchQueryParser.parse(trimmed).terms.joined(separator: " ")
+            guard !semanticQuery.isEmpty, !trimmed.hasPrefix("/"), let provider = embeddingProvider else { return textResults }
 
             let vectors = embeddingVectors()
             guard !vectors.isEmpty else { return textResults }
 
             // 语义召回：余弦相似度，取 top limit
-            guard let queryData = provider(trimmed),
+            guard let queryData = provider(semanticQuery),
                   let queryVector = Self.vectors(from: queryData) else { return textResults }
             var candidates: [(id: Int64, score: Float)] = []
             for (id, vector) in vectors where vector.count == queryVector.count {
@@ -182,7 +267,7 @@ public final class ClipStore {
             // 仅对缺失条目做一次批量取回（替代逐条 item(id:)），并应用类别过滤
             var itemMap = Dictionary(uniqueKeysWithValues: textResults.map { ($0.id, $0) })
             let missing = vectorRankIDs.filter { itemMap[$0] == nil }
-            for fetched in items(ids: missing) where matchesFilter(fetched, filter, snippetGroup: snippetGroup) {
+            for fetched in items(ids: missing) where matchesFilter(fetched, filter, snippetGroup: snippetGroup, context: context) {
                 itemMap[fetched.id] = fetched
             }
             return scores
@@ -197,7 +282,8 @@ public final class ClipStore {
         }
     }
 
-    private func textSearch(_ trimmed: String, filter: FilterKind, snippetGroup: String? = nil, limit: Int) throws -> [ClipItem] {
+    private func textSearch(_ trimmed: String, filter: FilterKind, snippetGroup: String? = nil,
+                            context: ContextFilter = ContextFilter(), limit: Int) throws -> [ClipItem] {
         // 短语代码快速匹配与文本扩展（/xxx 或直接 /）
         if trimmed.hasPrefix("/") {
             let rawCode = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -225,6 +311,9 @@ public final class ClipStore {
                 clauses.append("meta LIKE ?")
                 args.append(.text("%\"snippet_group\":\"\(group)\"%"))
             }
+            let snippetCtx = contextClauses(context, alias: "")
+            clauses.append(contentsOf: snippetCtx.clauses)
+            args.append(contentsOf: snippetCtx.args)
 
             var sql = "SELECT \(Self.listColumns) FROM clip"
             if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
@@ -272,8 +361,12 @@ public final class ClipStore {
             return collect(statement)
         }
 
-        if !trimmed.isEmpty, db.hasFTS5, !containsCJK(trimmed) {
-            let ftsQuery = ftsExpression(for: trimmed)
+        // 检索语法解析：terms 为普通关键词，其余为结构化过滤条件
+        let parsed = SearchQueryParser.parse(trimmed)
+        let terms = parsed.terms.joined(separator: " ")
+
+        if !terms.isEmpty, db.hasFTS5, !containsCJK(terms), !parsed.hasFilters {
+            let ftsQuery = ftsExpression(for: terms)
             var sql = "SELECT \(Self.ftsListColumns) FROM clip, clip_fts WHERE clip_fts MATCH ? AND clip.id = clip_fts.rowid"
             if let clause = filter.kindClause { sql += " AND \(clause)" }
             if let extra = filter.extraClause { sql += " AND \(extra)" }
@@ -283,6 +376,9 @@ public final class ClipStore {
                 sql += " AND clip.meta LIKE ?"
                 bindArgs.append(.text("%\"snippet_group\":\"\(group)\"%"))
             }
+            let ftsCtx = contextClauses(context, alias: "clip.")
+            for clause in ftsCtx.clauses { sql += " AND \(clause)" }
+            bindArgs.append(contentsOf: ftsCtx.args)
             sql += " ORDER BY clip.pinned DESC, rank LIMIT ?"
             bindArgs.append(.int(Int64(limit)))
             let statement = try db.prepare(sql)
@@ -292,12 +388,15 @@ public final class ClipStore {
 
         var clauses: [String] = []
         var args: [SQLValue] = []
-        if !trimmed.isEmpty {
+        if !terms.isEmpty {
             clauses.append("(plain_text LIKE ? OR title LIKE ? OR meta LIKE ?)")
-            args.append(.text("%\(trimmed)%"))
-            args.append(.text("%\(trimmed)%"))
-            args.append(.text("%\"snippet_shortcode\":\"%\(trimmed)%\"%"))
+            args.append(.text("%\(terms)%"))
+            args.append(.text("%\(terms)%"))
+            args.append(.text("%\"snippet_shortcode\":\"%\(terms)%\"%"))
         }
+        let syntax = structuredClauses(parsed, alias: "")
+        clauses.append(contentsOf: syntax.clauses)
+        args.append(contentsOf: syntax.args)
         if let clause = filter.kindClause { clauses.append(clause) }
         if let extra = filter.extraClause { clauses.append(extra) }
         if filter == .pinned { clauses.append("pinned = 1") }
@@ -305,6 +404,9 @@ public final class ClipStore {
             clauses.append("meta LIKE ?")
             args.append(.text("%\"snippet_group\":\"\(group)\"%"))
         }
+        let likeCtx = contextClauses(context, alias: "")
+        clauses.append(contentsOf: likeCtx.clauses)
+        args.append(contentsOf: likeCtx.args)
         var sql = "SELECT \(Self.listColumns) FROM clip"
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
         sql += " ORDER BY pinned DESC, created_at DESC LIMIT ?"
@@ -314,7 +416,81 @@ public final class ClipStore {
         return collect(statement)
     }
 
-    func matchesFilter(_ item: ClipItem, _ filter: FilterKind, snippetGroup: String? = nil) -> Bool {
+    /// 检索语法（`#11` / `len:>8` / `app:微信` / `before:昨天` / `138*`）生成的 SQL 子句。
+    private func structuredClauses(_ query: ParsedQuery, alias: String) -> (clauses: [String], args: [SQLValue]) {
+        var clauses: [String] = []
+        var args: [SQLValue] = []
+        let numKey = "\(alias)num_key"
+
+        if let count = query.digitCount {
+            clauses.append("(\(numKey) IS NOT NULL AND length(\(numKey)) = ?)")
+            args.append(.int(Int64(count)))
+        }
+        if let count = query.minDigits {
+            clauses.append("(\(numKey) IS NOT NULL AND length(\(numKey)) > ?)")
+            args.append(.int(Int64(count)))
+        }
+        if let count = query.maxDigits {
+            clauses.append("(\(numKey) IS NOT NULL AND length(\(numKey)) < ?)")
+            args.append(.int(Int64(count)))
+        }
+        if let count = query.length {
+            clauses.append("length(\(alias)plain_text) = ?")
+            args.append(.int(Int64(count)))
+        }
+        if let count = query.minLength {
+            clauses.append("length(\(alias)plain_text) > ?")
+            args.append(.int(Int64(count)))
+        }
+        if let count = query.maxLength {
+            clauses.append("length(\(alias)plain_text) < ?")
+            args.append(.int(Int64(count)))
+        }
+        if let source = query.source {
+            clauses.append("(\(alias)source_name LIKE ? OR \(alias)source_bundle LIKE ?)")
+            args.append(.text("%\(source)%"))
+            args.append(.text("%\(source)%"))
+        }
+        if let before = query.before {
+            clauses.append("\(alias)created_at < ?")
+            args.append(.double(before.timeIntervalSince1970))
+        }
+        if let after = query.after {
+            clauses.append("\(alias)created_at >= ?")
+            args.append(.double(after.timeIntervalSince1970))
+        }
+        if let prefix = query.prefix {
+            clauses.append("(\(alias)plain_text LIKE ? OR \(alias)title LIKE ?)")
+            args.append(.text("\(prefix)%"))
+            args.append(.text("\(prefix)%"))
+        }
+        return (clauses, args)
+    }
+
+    /// 情境过滤的 SQL 子句与绑定参数；alias 为表别名前缀（如 "clip."）。
+    private func contextClauses(_ context: ContextFilter, alias: String) -> (clauses: [String], args: [SQLValue]) {
+        var clauses: [String] = []
+        var args: [SQLValue] = []
+        if let bundle = context.sourceBundle, !bundle.isEmpty {
+            clauses.append("\(alias)source_bundle = ?")
+            args.append(.text(bundle))
+        }
+        if let since = context.since {
+            clauses.append("\(alias)created_at >= ?")
+            args.append(.double(since.timeIntervalSince1970))
+        }
+        if let until = context.until {
+            clauses.append("\(alias)created_at < ?")
+            args.append(.double(until.timeIntervalSince1970))
+        }
+        return (clauses, args)
+    }
+
+    func matchesFilter(_ item: ClipItem, _ filter: FilterKind, snippetGroup: String? = nil,
+                       context: ContextFilter = ContextFilter()) -> Bool {
+        if let bundle = context.sourceBundle, !bundle.isEmpty, item.sourceBundle != bundle { return false }
+        if let since = context.since, item.createdAt < since { return false }
+        if let until = context.until, item.createdAt >= until { return false }
         if filter == .snippet, let group = snippetGroup, !group.isEmpty {
             guard item.tags.contains(FilterKind.snippetTag) && item.snippetGroup == group else { return false }
         }
@@ -326,6 +502,7 @@ public final class ClipStore {
         case .image: return item.kind == .image
         case .file: return item.kind == .file
         case .link: return item.kind == .url
+        case .number: return NumberKind.allTags.contains { item.tags.contains($0) }
         }
     }
 
@@ -419,6 +596,41 @@ public final class ClipStore {
         try statement.run()
     }
 
+    /// 用户自定义标题的 meta 标记；置位后智能标题 / OCR / 链接标题都不再覆盖 title 列。
+    public static let userTitleKey = "user_title"
+
+    /// 设置用户自定义标题（写入 title 列，因此 FTS 与 LIKE 检索都能命中）。
+    /// 传 nil 或空串表示清除，恢复设置前的自动标题。
+    @discardableResult
+    public func setUserTitle(_ id: Int64, title: String?) throws -> ClipItem? {
+        guard let existing = item(id: id) else { return nil }
+        var meta = existing.meta
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let newTitle: String?
+        if let trimmed, !trimmed.isEmpty {
+            // 首次标注时备份原自动标题，便于之后还原
+            if meta[Self.userTitleKey] != "1" {
+                if let auto = existing.title, !auto.isEmpty {
+                    meta["auto_title"] = auto
+                } else {
+                    meta.removeValue(forKey: "auto_title")
+                }
+            }
+            meta[Self.userTitleKey] = "1"
+            newTitle = trimmed
+        } else {
+            meta.removeValue(forKey: Self.userTitleKey)
+            let restored = meta.removeValue(forKey: "auto_title")
+            newTitle = (restored?.isEmpty == false) ? restored : nil
+        }
+
+        let statement = try db.prepare("UPDATE clip SET title = ?, meta = ? WHERE id = ?")
+        statement.bind([.text(newTitle), .text(json(meta)), .int(id)])
+        try statement.run()
+        return item(id: id)
+    }
+
     /// 编辑条目文本（富文本场景仅替换纯文本表示）；文本变化后向量失效待补算。
     public func updateText(_ id: Int64, _ text: String) throws {
         guard let existing = item(id: id) else { return }
@@ -441,7 +653,8 @@ public final class ClipStore {
         }
         var meta = existing.meta
         meta["ocr"] = "1"
-        let newTitle = title ?? existing.title
+        // 用户手动标注过的标题不被 OCR / 智能标题覆盖
+        let newTitle = meta[Self.userTitleKey] == "1" ? existing.title : (title ?? existing.title)
         let statement = try db.prepare("""
             UPDATE clip SET plain_text = ?, tags = ?, meta = ?, title = ? WHERE id = ?
             """)
@@ -456,12 +669,15 @@ public final class ClipStore {
     public func updateURLMetadata(_ id: Int64, title: String?, faviconData: Data?) throws -> ClipItem? {
         guard let existing = item(id: id) else { return nil }
         let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let newTitle = (trimmedTitle?.isEmpty == false) ? trimmedTitle : existing.title
+        let isUserTitled = existing.meta[Self.userTitleKey] == "1"
+        let newTitle = isUserTitled
+            ? existing.title
+            : ((trimmedTitle?.isEmpty == false) ? trimmedTitle : existing.title)
         let newInlineData = faviconData ?? existing.inlineData
         guard newTitle != existing.title || faviconData != nil else { return existing }
 
         var meta = existing.meta
-        if newTitle != nil { meta["link_title"] = "1" }
+        if newTitle != nil, !isUserTitled { meta["link_title"] = "1" }
         if newInlineData != nil { meta["link_favicon"] = "1" }
 
         let statement = try db.prepare("""
@@ -480,6 +696,85 @@ public final class ClipStore {
     // MARK: - 片段管理
 
     /// 获取当前所有已存在的片段分组列表（去重且排序）
+    /// 按当前标签规则重算存量条目的自动标签（只增不减，规则升级后一次性回填）。
+    /// 新增号码识别等规则后，历史条目也需要补上标签才能被分类过滤到。
+    @discardableResult
+    public func backfillAutoTags(limit: Int = 5000) -> Int {
+        guard let statement = try? db.prepare("""
+            SELECT id, kind, plain_text, tags FROM clip
+            WHERE kind IN ('text','url','richText')
+            LIMIT ?
+            """) else { return 0 }
+        statement.bind([.int(Int64(limit))])
+
+        var updates: [(id: Int64, tags: [String])] = []
+        while statement.step() {
+            let id = statement.columnInt(0)
+            guard let kindRaw = statement.columnText(1), let kind = ClipKind(rawValue: kindRaw) else { continue }
+            let text = statement.columnText(2) ?? ""
+            var tags = decodeTags(from: statement.columnText(3))
+            let missing = AutoTagger.tags(for: text, kind: kind).filter { !tags.contains($0) }
+            guard !missing.isEmpty else { continue }
+            tags.append(contentsOf: missing)
+            updates.append((id, tags))
+        }
+
+        guard !updates.isEmpty,
+              let update = try? db.prepare("UPDATE clip SET tags = ? WHERE id = ?") else { return 0 }
+        for entry in updates {
+            update.bind([.text(json(entry.tags)), .int(entry.id)])
+            try? update.run()
+        }
+        return updates.count
+    }
+
+    /// 回填存量条目的号码归一化键（迁移 v4 后的一次性后台任务）。
+    /// 非号码条目写入空串哨兵，避免每次启动重复扫描。
+    public func backfillNumberKeys(limit: Int = 5000) {
+        guard let statement = try? db.prepare("""
+            SELECT id, plain_text FROM clip
+            WHERE num_key IS NULL AND kind IN ('text','url') AND length(plain_text) <= 64
+            LIMIT ?
+            """) else { return }
+        statement.bind([.int(Int64(limit))])
+
+        var updates: [(id: Int64, key: String)] = []
+        while statement.step() {
+            let id = statement.columnInt(0)
+            let key = statement.columnText(1).flatMap { NumberRecognizer.normalize($0) } ?? ""
+            updates.append((id, key))
+        }
+        guard !updates.isEmpty,
+              let update = try? db.prepare("UPDATE clip SET num_key = ? WHERE id = ?") else { return }
+        for entry in updates {
+            update.bind([.text(entry.key), .int(entry.id)])
+            try? update.run()
+        }
+    }
+
+    /// 来源应用聚合（按条目数降序），供情境筛选菜单展示。
+    public func distinctSources(limit: Int = 20) -> [ClipSource] {
+        guard let statement = try? db.prepare("""
+            SELECT source_bundle, source_name, COUNT(*) FROM clip
+            WHERE source_bundle <> ''
+            GROUP BY source_bundle
+            ORDER BY COUNT(*) DESC
+            LIMIT ?
+            """) else { return [] }
+        statement.bind([.int(Int64(limit))])
+        var result: [ClipSource] = []
+        while statement.step() {
+            let bundle = statement.columnText(0) ?? ""
+            let rawName = statement.columnText(1) ?? ""
+            result.append(ClipSource(
+                bundle: bundle,
+                name: rawName.isEmpty ? bundle : rawName,
+                count: Int(statement.columnInt(2))
+            ))
+        }
+        return result
+    }
+
     public func allSnippetGroups() -> [String] {
         guard let statement = try? db.prepare("""
             SELECT meta FROM clip WHERE tags LIKE '%"\(FilterKind.snippetTag)"%'

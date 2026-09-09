@@ -39,6 +39,10 @@ public enum AutoTagger {
         }
         if urlRegex?.firstMatch(in: sample, range: sampleRange) != nil { tags.append("含链接") }
         if sample.count <= 64, detectColor(in: sample) != nil { tags.append("颜色") }
+        // 号码类内容无语义，靠类型标签 + 分类过滤找回（手机号/银行卡/身份证/快递单号…）
+        if let numberKind = NumberRecognizer.detect(sample) {
+            tags.append(numberKind.rawValue)
+        }
         return tags
     }
 
