@@ -1315,6 +1315,179 @@ runner.run("ClipStore 语义检索运行时开关") {
     runner.expectTrue(store.search(query: "语义开关").count == 1, "卸载后检索自动退回纯文本路径")
 }
 
+runner.run("NumberRecognizer 号码类型识别") {
+    runner.expectEqual(NumberRecognizer.detect("13812345678"), .phone, "11 位手机号识别")
+    runner.expectEqual(NumberRecognizer.detect("138 1234 5678"), .phone, "带分隔符的手机号识别")
+    runner.expectEqual(NumberRecognizer.detect("4242424242424242"), .bankCard, "Luhn 通过的银行卡识别")
+    runner.expectEqual(NumberRecognizer.detect("110101199003071233"), .idCard, "身份证校验位通过")
+    runner.expectEqual(NumberRecognizer.detect("110101199003071234"), .plain, "身份证校验位不通过时退化为数字")
+    runner.expectEqual(NumberRecognizer.detect("192.168.1.1"), .ipAddress, "IPv4 识别")
+    runner.expectEqual(NumberRecognizer.detect("SF1234567890"), .tracking, "快递单号识别")
+    runner.expectEqual(NumberRecognizer.detect("¥1,234.56"), .amount, "带货币符号的金额识别")
+    runner.expectEqual(NumberRecognizer.detect("20260909"), .plain, "纯数字兜底")
+    runner.expectTrue(NumberRecognizer.detect("hello world") == nil, "普通文本不是号码")
+    runner.expectTrue(NumberRecognizer.detect("https://example.com/123456") == nil, "URL 不是号码")
+    runner.expectTrue(NumberRecognizer.detect("999") == nil, "位数过少不算号码")
+}
+
+runner.run("NumberRecognizer 分组展示与归一化") {
+    runner.expectEqual(NumberRecognizer.displayText("13812345678") ?? "", "138 1234 5678", "手机号 3-4-4 分组")
+    runner.expectEqual(NumberRecognizer.displayText("4242424242424242") ?? "", "4242 4242 4242 4242", "卡号 4 位分组")
+    runner.expectEqual(NumberRecognizer.displayText("110101199003071233") ?? "", "110101 19900307 1233", "身份证 6-8-4 分组")
+    runner.expectTrue(NumberRecognizer.displayText("hello") == nil, "非号码不分组")
+    runner.expectEqual(NumberRecognizer.normalize("138-1234 5678") ?? "", "13812345678", "归一化去掉分隔符")
+    runner.expectTrue(NumberRecognizer.normalize("SF1234567890") == nil, "含字母的单号不参与归一化")
+}
+
+runner.run("ClipStore 号码归一化聚合与「号码」分类") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let first = try store.capture(
+        kind: .text, plainText: "138 1234 5678", sourceBundle: "com.test.a", sourceName: "微信",
+        tags: AutoTagger.tags(for: "138 1234 5678", kind: .text)
+    )
+    runner.expectTrue(first.isNew, "首次采集入库")
+    runner.expectTrue(first.item.tags.contains("手机号"), "自动打上手机号标签")
+
+    let second = try store.capture(
+        kind: .text, plainText: "13812345678", sourceBundle: "com.test.a", sourceName: "微信",
+        tags: AutoTagger.tags(for: "13812345678", kind: .text)
+    )
+    runner.expectFalse(second.isNew, "同一号码的不同写法归并为同一条")
+    runner.expectEqual(second.item.id, first.item.id, "复用同一条目 id")
+    runner.expectEqual(second.item.useCount, 2, "use_count 累加")
+
+    let numbers = store.search(query: "", filter: .number, limit: 50)
+    runner.expectEqual(numbers.count, 1, "「号码」分类只召回号码条目")
+    runner.expectEqual(numbers.first?.id, first.item.id, "号码分类命中的是手机号条目")
+}
+
+runner.run("ClipStore 用户自定义标题") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let captured = try store.capture(
+        kind: .text, plainText: "6222020000000000", sourceBundle: "com.test.b", sourceName: "Safari"
+    )
+    let id = captured.item.id
+
+    _ = try store.setUserTitle(id, title: "招行卡号")
+    let titled = store.item(id: id)
+    runner.expectEqual(titled?.title ?? "", "招行卡号", "自定义标题写入 title")
+    runner.expectTrue(titled?.isUserTitled == true, "标记为用户标题")
+    runner.expectEqual(store.search(query: "招行卡号", limit: 10).count, 1, "自定义标题可被检索命中")
+
+    _ = try store.updateOCR(id, text: "6222020000000000", title: "自动识别标题")
+    runner.expectEqual(store.item(id: id)?.title ?? "", "招行卡号", "OCR 不覆盖用户标题")
+
+    _ = try store.updateURLMetadata(id, title: "网页标题", faviconData: nil)
+    runner.expectEqual(store.item(id: id)?.title ?? "", "招行卡号", "链接元数据不覆盖用户标题")
+
+    _ = try store.setUserTitle(id, title: nil)
+    runner.expectTrue(store.item(id: id)?.title == nil, "清除后恢复为无标题")
+}
+
+runner.run("ClipStore 情境过滤（来源应用 + 时间范围）") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let old = Date().addingTimeInterval(-3 * 86400)
+    _ = try store.capture(
+        kind: .text, plainText: "来自微信的旧内容", sourceBundle: "com.tencent.xinWeChat",
+        sourceName: "微信", createdAt: old
+    )
+    _ = try store.capture(
+        kind: .text, plainText: "来自浏览器的内容", sourceBundle: "com.apple.Safari",
+        sourceName: "Safari"
+    )
+
+    let bySource = store.search(query: "", context: ContextFilter(sourceBundle: "com.tencent.xinWeChat"), limit: 20)
+    runner.expectEqual(bySource.count, 1, "按来源应用过滤")
+    runner.expectEqual(bySource.first?.sourceName ?? "", "微信", "命中微信来源")
+
+    let recent = store.search(query: "", context: ContextFilter(since: Calendar.current.startOfDay(for: Date())), limit: 20)
+    runner.expectEqual(recent.count, 1, "按时间范围过滤掉 3 天前的条目")
+
+    let all = store.search(query: "", limit: 20)
+    runner.expectEqual(all.count, 2, "无情境条件时返回全部")
+}
+
+runner.run("SearchQueryParser 检索语法") {
+    let parsed = SearchQueryParser.parse("#11")
+    runner.expectEqual(parsed.digitCount ?? 0, 11, "#N 解析为位数")
+    runner.expectTrue(parsed.terms.isEmpty, "#N 不进入关键词")
+
+    let ranged = SearchQueryParser.parse("#>8 #<12")
+    runner.expectEqual(ranged.minDigits ?? 0, 8, "#>N 解析")
+    runner.expectEqual(ranged.maxDigits ?? 0, 12, "#<N 解析")
+
+    let mixed = SearchQueryParser.parse("订单 app:微信 len:>10 138*")
+    runner.expectEqual(mixed.terms, ["订单"], "普通词保留为关键词")
+    runner.expectEqual(mixed.source ?? "", "微信", "app: 解析来源")
+    runner.expectEqual(mixed.minLength ?? 0, 10, "len:>N 解析")
+    runner.expectEqual(mixed.prefix ?? "", "138", "前缀通配解析")
+    runner.expectTrue(mixed.hasFilters, "包含结构化条件")
+
+    let dated = SearchQueryParser.parse("before:昨天 after:2026-09-01")
+    runner.expectTrue(dated.before != nil, "before:昨天 解析成功")
+    runner.expectTrue(dated.after != nil, "after:日期 解析成功")
+
+    runner.expectFalse(SearchQueryParser.parse("普通搜索").hasFilters, "普通查询不含结构化条件")
+}
+
+runner.run("ClipStore 检索语法端到端") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    _ = try store.capture(
+        kind: .text, plainText: "13812345678", sourceBundle: "com.tencent.xinWeChat", sourceName: "微信"
+    )
+    _ = try store.capture(
+        kind: .text, plainText: "这是一段比较长的说明文字用于长度过滤测试", sourceBundle: "com.apple.Safari",
+        sourceName: "Safari"
+    )
+
+    runner.expectEqual(store.search(query: "#11", limit: 20).count, 1, "#11 命中 11 位数字")
+    runner.expectEqual(store.search(query: "#>10", limit: 20).count, 1, "#>10 命中")
+    runner.expectEqual(store.search(query: "app:微信", limit: 20).count, 1, "app: 来源过滤")
+    runner.expectEqual(store.search(query: "138*", limit: 20).count, 1, "前缀匹配")
+    runner.expectEqual(store.search(query: "len:>15", limit: 20).count, 1, "len:>N 长度过滤")
+    runner.expectEqual(store.search(query: "len:<15", limit: 20).count, 1, "len:<N 长度过滤")
+    runner.expectEqual(store.search(query: "app:微信 #11", limit: 20).count, 1, "多条件叠加")
+    runner.expectEqual(store.search(query: "app:微信 #16", limit: 20).count, 0, "条件冲突时无结果")
+}
+
+runner.run("ClipStore 存量条目标签回填与去重补标签") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // 模拟"标签规则升级前入库"的条目：采集时未打标签
+    let legacy = try store.capture(
+        kind: .text, plainText: "13812345678", sourceBundle: "com.test", sourceName: "Test", tags: []
+    )
+    runner.expectEqual(store.search(query: "", filter: .number, limit: 10).count, 0, "回填前号码分类为空")
+
+    let updated = store.backfillAutoTags()
+    runner.expectEqual(updated, 1, "回填 1 条存量条目")
+    runner.expectEqual(store.search(query: "", filter: .number, limit: 10).count, 1, "回填后号码分类可命中")
+    runner.expectEqual(store.backfillAutoTags(), 0, "重复回填幂等")
+
+    // 规则升级后重新复制同一内容：去重分支也应补齐标签
+    let (store2, dir2) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir2) }
+    _ = try store2.capture(
+        kind: .text, plainText: "4242424242424242", sourceBundle: "com.test", sourceName: "Test", tags: []
+    )
+    let again = try store2.capture(
+        kind: .text, plainText: "4242424242424242", sourceBundle: "com.test", sourceName: "Test",
+        tags: AutoTagger.tags(for: "4242424242424242", kind: .text)
+    )
+    runner.expectFalse(again.isNew, "重复复制仍走去重分支")
+    runner.expectTrue(again.item.tags.contains("银行卡"), "去重时补齐自动标签")
+    runner.expectEqual(legacy.item.id, legacy.item.id, "占位断言保持结构一致")
+}
+
 print("----")
 
 
