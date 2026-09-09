@@ -873,12 +873,12 @@ runner.run("L10n 多语言本地化字典与切换") {
     // 验证中文
     runner.expectEqual(L10n.filterTitle(.all, lang: .zhHans), "全部", "中文全部")
     runner.expectEqual(L10n.filterTitle(.snippet, lang: .zhHans), "片段", "中文片段")
-    runner.expectEqual(L10n.tr("footer.paste", lang: .zhHans), "⏎ 粘贴", "中文粘贴")
+    runner.expectEqual(L10n.tr("footer.paste", lang: .zhHans), "粘贴", "中文粘贴")
 
     // 验证英文
     runner.expectEqual(L10n.filterTitle(.all, lang: .en), "All", "英文 All")
     runner.expectEqual(L10n.filterTitle(.snippet, lang: .en), "Snippets", "英文 Snippets")
-    runner.expectEqual(L10n.tr("footer.paste", lang: .en), "⏎ Paste", "英文 Paste")
+    runner.expectEqual(L10n.tr("footer.paste", lang: .en), "Paste", "英文 Paste")
 
     // 验证格式化替换
     let formattedZh = L10n.tr("batch.selected", 5, lang: .zhHans)
@@ -1020,6 +1020,299 @@ runner.run("PanelViewModel 内置 AI 侧边栏展开与实时选择联动") {
     runner.expectEqual(vm.aiModel.item?.id, item1.id, "openAI 准确定位目标条目")
 
     try? FileManager.default.removeItem(at: tempDir)
+}
+
+runner.run("标签多语言映射与底部快捷键国际化") {
+    // 标签多语言映射
+    runner.expectEqual(L10n.tagTitle("代码", lang: .en), "Code", "代码英文映射")
+    runner.expectEqual(L10n.tagTitle("长文本", lang: .en), "Long Text", "长文本英文映射")
+    runner.expectEqual(L10n.tagTitle("链接", lang: .en), "Link", "链接英文映射")
+    runner.expectEqual(L10n.tagTitle("图片", lang: .en), "Image", "图片英文映射")
+    runner.expectEqual(L10n.tagTitle("文件", lang: .en), "File", "文件英文映射")
+    runner.expectEqual(L10n.tagTitle("富文本", lang: .en), "Rich Text", "富文本英文映射")
+    runner.expectEqual(L10n.tagTitle("邮箱", lang: .en), "Email", "邮箱英文映射")
+    runner.expectEqual(L10n.tagTitle("含链接", lang: .en), "Has Link", "含链接英文映射")
+    runner.expectEqual(L10n.tagTitle("颜色", lang: .en), "Color", "颜色英文映射")
+    runner.expectEqual(L10n.tagTitle("片段", lang: .en), "Snippet", "片段英文映射")
+
+    // 中文回退/保留
+    runner.expectEqual(L10n.tagTitle("代码", lang: .zhHans), "代码", "代码中文保持")
+    runner.expectEqual(L10n.tagTitle("自定义标签", lang: .en), "自定义标签", "未知自定义标签原样保留")
+
+    // 底部快捷键文本国际化
+    runner.expectEqual(L10n.tr("footer.paste", lang: .en), "Paste", "粘贴快捷键英文")
+    runner.expectEqual(L10n.tr("footer.copy", lang: .en), "Copy", "复制快捷键英文")
+    runner.expectEqual(L10n.tr("footer.preview", lang: .en), "Detail", "详情快捷键英文")
+    runner.expectEqual(L10n.tr("footer.ai", lang: .en), "AI", "AI 快捷键英文")
+    runner.expectEqual(L10n.tr("footer.delete", lang: .en), "Delete", "删除快捷键英文")
+    runner.expectEqual(L10n.tr("footer.cancel", lang: .en), "Cancel", "取消快捷键英文")
+
+    // 分类筛选国际化
+    runner.expectEqual(L10n.filterTitle(.all, lang: .en), "All", "全部英文")
+    runner.expectEqual(L10n.filterTitle(.text, lang: .en), "Text", "文本英文")
+    runner.expectEqual(L10n.filterTitle(.image, lang: .en), "Image", "图片英文")
+    runner.expectEqual(L10n.filterTitle(.file, lang: .en), "File", "文件英文")
+    runner.expectEqual(L10n.filterTitle(.link, lang: .en), "Link", "链接英文")
+    runner.expectEqual(L10n.filterTitle(.snippet, lang: .en), "Snippets", "片段英文")
+    runner.expectEqual(L10n.filterTitle(.pinned, lang: .en), "Pinned", "已固定英文")
+
+    // ClipRowView Equatable 语言变更判定
+    let sampleItem = ClipItem(
+        id: 100, kind: .text, plainText: "测试", sourceBundle: "app", sourceName: "App",
+        byteSize: 6, createdAt: Date(), lastUsedAt: Date(), useCount: 1, pinned: false,
+        tags: ["代码"], meta: [:]
+    )
+    let rowZh = ClipRowView(item: sampleItem, selected: false, thumbnail: nil, searchHighlight: "", language: .zhHans)
+    let rowEn = ClipRowView(item: sampleItem, selected: false, thumbnail: nil, searchHighlight: "", language: .en)
+    runner.expectFalse(rowZh == rowEn, "语言变更时 ClipRowView.== 必须返回 false 以触发刷新")
+}
+
+runner.run("软件更新与语义版本比较引擎") {
+    // 语义版本比较
+    runner.expectTrue(UpdateManager.compareVersion("0.2.1", greaterThan: "0.2.0"), "0.2.1 应当大于 0.2.0")
+    runner.expectTrue(UpdateManager.compareVersion("1.0.0", greaterThan: "0.9.9"), "1.0.0 应当大于 0.9.9")
+    runner.expectTrue(UpdateManager.compareVersion("v0.3.0", greaterThan: "0.2.9"), "前导 v0.3.0 应当大于 0.2.9")
+    runner.expectTrue(UpdateManager.compareVersion("0.2.0.1", greaterThan: "0.2.0"), "第四位版本号比较有效")
+
+    runner.expectFalse(UpdateManager.compareVersion("0.2.0", greaterThan: "0.2.0"), "相同版本号判定非大于")
+    runner.expectFalse(UpdateManager.compareVersion("0.1.9", greaterThan: "0.2.0"), "较小版本号判定非大于")
+    runner.expectFalse(UpdateManager.compareVersion("0.2.0", greaterThan: "0.2.0.1"), "较短版本号判定非大于")
+
+    // AppSettings 自动更新设置持久化
+    let tempDefaults = UserDefaults(suiteName: "test.updates.\(UUID().uuidString)")!
+    let settings = AppSettings(defaults: tempDefaults)
+    runner.expectTrue(settings.autoCheckUpdates, "默认开启自动检查更新")
+    settings.autoCheckUpdates = false
+    runner.expectFalse(settings.autoCheckUpdates, "修改为关闭自动检查")
+    let reloaded = AppSettings(defaults: tempDefaults)
+    runner.expectFalse(reloaded.autoCheckUpdates, "持久化保存并在重启时正确加载")
+}
+
+runner.run("Phase 3 - 极客预置动作库与脚本执行引擎") {
+    // 1. 预置动作库验证
+    runner.expectEqual(ScriptAction.presetLibrary.count, 14, "预置库应包含14个精选本地动作")
+    runner.expectEqual(ScriptAction.defaultPresets.count, 4, "默认启用4个推荐动作")
+
+    // 2. 跨版本向后兼容反序列化（旧版缺少 type 和 icon）
+    let legacyJSON = """
+    {"id":"legacy_1","name":"旧脚本","command":"echo hello"}
+    """.data(using: .utf8)!
+    let decodedLegacy = try? JSONDecoder().decode(ScriptAction.self, from: legacyJSON)
+    runner.expectTrue(decodedLegacy != nil, "旧版本无 type/icon 的 JSON 能够无缝兼容反序列化")
+    runner.expectEqual(decodedLegacy?.type, .shell, "旧版本默认推断为 .shell 类型")
+    runner.expectEqual(decodedLegacy?.icon, "terminal", "旧版本默认使用 terminal 图标")
+
+    // 3. 快捷指令类型序列化
+    let shortcutAction = ScriptAction(name: "总结文本", command: "Summarize", type: .shortcut, icon: "bolt.horizontal.fill")
+    let encoded = try? JSONEncoder().encode(shortcutAction)
+    runner.expectTrue(encoded != nil, "快捷指令动作能够序列化")
+    if let encoded {
+        let decoded = try? JSONDecoder().decode(ScriptAction.self, from: encoded)
+        runner.expectEqual(decoded?.type, .shortcut, "快捷指令动作反序列化类型一致")
+        runner.expectEqual(decoded?.command, "Summarize", "快捷指令名称一致")
+    }
+
+    // 4. 国际化预置名称与描述
+    let tsPreset = ScriptAction.presetLibrary[0]
+    runner.expectEqual(L10n.scriptName(tsPreset, lang: .en), "Timestamp to Date", "英文下预置动作名称翻译")
+    runner.expectEqual(L10n.scriptName(tsPreset, lang: .zhHans), "时间戳转日期", "中文下预置动作名称正常")
+
+    // 5. 实际 Shell 脚本执行（base64 编码解码）
+    let b64Encode = ScriptAction(name: "b64", command: "base64", type: .shell)
+    let b64Decode = ScriptAction(name: "b64d", command: "base64 --decode", type: .shell)
+    let sampleInput = "ClipMate Pure Native"
+
+    var encResult: String?
+    let sema1 = DispatchSemaphore(value: 0)
+    Task {
+        encResult = try? await ScriptRunner.run(b64Encode, input: sampleInput)
+        sema1.signal()
+    }
+    _ = sema1.wait(timeout: .now() + 10)
+    runner.expectEqual(encResult?.trimmingCharacters(in: .whitespacesAndNewlines), "Q2xpcE1hdGUgUHVyZSBOYXRpdmU=", "Base64 编码成功")
+
+    if let enc = encResult {
+        var decResult: String?
+        let sema2 = DispatchSemaphore(value: 0)
+        Task {
+            decResult = try? await ScriptRunner.run(b64Decode, input: enc)
+            sema2.signal()
+        }
+        _ = sema2.wait(timeout: .now() + 10)
+        runner.expectEqual(decResult?.trimmingCharacters(in: .whitespacesAndNewlines), sampleInput, "Base64 解码成功还原")
+    }
+}
+
+runner.run("Phase 3 - 文本扩展与 Shortcode 快速匹配检索") {
+    let (store, tempDir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    // 录入普通剪贴板条目
+    _ = try store.capture(kind: .text, plainText: "My work email is contact@example.com", sourceBundle: "com.apple.Safari", sourceName: "Safari")
+    _ = try store.capture(kind: .text, plainText: "Personal email address", sourceBundle: "com.apple.mail", sourceName: "Mail")
+
+    // 录入常用片段并设置 shortcode（带与不带斜杠均能规范存储）
+    let snip1 = try store.createSnippet(title: "工作邮箱", text: "john.doe@company.com", group: "邮件", shortcode: "email")
+    let snip2 = try store.createSnippet(title: "Shell 问候", text: "echo 'hello world'", group: "开发", shortcode: "/sh")
+
+    runner.expectEqual(snip1.snippetShortcode, "email", "短码存储去除了多余字符")
+    runner.expectEqual(snip2.snippetShortcode, "sh", "带 / 前缀的短码自动归一化为纯短码")
+
+    // 1. 输入 / 唤出所有短码片段
+    let slashAll = store.search(query: "/")
+    runner.expectTrue(!slashAll.isEmpty, "输入 / 召回短码片段")
+    runner.expectTrue(slashAll.contains(where: { $0.id == snip1.id }), "包含工作邮箱短码片段")
+    runner.expectTrue(slashAll.contains(where: { $0.id == snip2.id }), "包含 Shell 问候短码片段")
+
+    // 2. 输入 /email 精准扩展置顶在第 0 位
+    let searchEmail = store.search(query: "/email")
+    runner.expectFalse(searchEmail.isEmpty, "/email 检索成功")
+    runner.expectEqual(searchEmail.first?.id, snip1.id, "/email 检索时，短码精确匹配的片段必须置顶排在第0位")
+
+    // 3. 输入 /sh 精准扩展置顶在第 0 位
+    let searchSh = store.search(query: "/sh")
+    runner.expectFalse(searchSh.isEmpty, "/sh 检索成功")
+    runner.expectEqual(searchSh.first?.id, snip2.id, "/sh 检索时，短码精确匹配的片段必须置顶排在第0位")
+
+    // 4. 更新短码（支持 updateSnippet）
+    _ = try store.updateSnippet(id: snip1.id, title: "我的工作邮箱", group: "工作", shortcode: "/workmail")
+    let reSearch = store.search(query: "/workmail")
+    runner.expectEqual(reSearch.first?.id, snip1.id, "更新短码后 /workmail 精准置顶")
+}
+
+runner.run("Phase 3 - 主题引擎与配色方案 (Theme Engine & Popular Color Schemes)") {
+    // 1. 验证 7 大热门主题枚举完备性
+    runner.expectEqual(AppTheme.allCases.count, 7, "支持 7 种主题风格")
+    let themeIDs = Set(AppTheme.allCases.map(\.rawValue))
+    let expectedIDs: Set<String> = ["default", "oneDarkPro", "dracula", "tokyoNight", "nord", "monokai", "githubLight"]
+    runner.expectEqual(themeIDs, expectedIDs, "主题标识符完整覆盖目标风格")
+
+    // 验证 rawValue 向前向后兼容性（包含 darcula 容错映射）
+    runner.expectEqual(AppTheme(rawValue: "dracula"), .dracula, "dracula 正常解析")
+    runner.expectEqual(AppTheme(rawValue: "darcula"), .dracula, "darcula 兼容映射至 dracula")
+
+    // 2. 验证各个主题的配置属性非空与合理性
+    for theme in AppTheme.allCases {
+        runner.expectEqual(theme.previewSwatches.count, 4, "\(theme.rawValue) 拥有 4 个特征预览色块")
+        _ = theme.previewBackgroundColor
+        _ = theme.searchBarBackground
+        _ = theme.borderColor
+        _ = theme.accent
+        _ = theme.selectionBackground
+        _ = theme.hoverBackground
+        _ = theme.snippetColor
+        _ = theme.pinColor
+        _ = theme.aiColor
+
+        for kind in ClipKind.allCases {
+            _ = theme.color(for: kind)
+        }
+
+        // 验证显示名称与描述非空
+        runner.expectFalse(L10n.themeTitle(theme).isEmpty, "\(theme.rawValue) 拥有本地化标题")
+        runner.expectFalse(L10n.themeDesc(theme).isEmpty, "\(theme.rawValue) 拥有本地化说明")
+    }
+
+    // 3. 验证深浅模式倾向
+    runner.expectTrue(AppTheme.default.preferredColorScheme == nil, "默认主题跟随系统外观")
+    runner.expectEqual(AppTheme.oneDarkPro.preferredColorScheme, .dark, "One Dark Pro 为深色外观")
+    runner.expectEqual(AppTheme.dracula.preferredColorScheme, .dark, "Dracula 为深色外观")
+    runner.expectEqual(AppTheme.tokyoNight.preferredColorScheme, .dark, "Tokyo Night 为深色外观")
+    runner.expectEqual(AppTheme.nord.preferredColorScheme, .dark, "Nord 为深色外观")
+    runner.expectEqual(AppTheme.monokai.preferredColorScheme, .dark, "Monokai 为深色外观")
+    runner.expectEqual(AppTheme.githubLight.preferredColorScheme, .light, "GitHub Light 为浅色外观")
+
+    // 4. 验证 AppSettings 主题切换通知与持久化
+    let settings = AppSettings()
+    var notificationReceived = false
+    let observer = NotificationCenter.default.addObserver(
+        forName: AppSettings.themeChangedNotification,
+        object: nil,
+        queue: nil
+    ) { notif in
+        if let newTheme = notif.object as? AppTheme, newTheme == .dracula {
+            notificationReceived = true
+        }
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+
+    settings.appTheme = .dracula
+    runner.expectEqual(settings.appTheme, .dracula, "AppSettings 成功切换为 Dracula")
+    runner.expectTrue(notificationReceived, "发送了 themeChangedNotification 通知")
+    runner.expectEqual(UserDefaults.standard.string(forKey: "appTheme"), "dracula", "成功持久化到 UserDefaults")
+
+    // 恢复为默认
+    settings.appTheme = .default
+    runner.expectEqual(settings.appTheme, .default, "AppSettings 恢复默认主题")
+
+    // 5. 验证 ClipRowView 在主题变更时的 Equatable 响应机制
+    let item = ClipItem(
+        id: 101, kind: .text, plainText: "Theme Test", sourceBundle: "test", sourceName: "Test",
+        byteSize: 10, createdAt: Date(), lastUsedAt: Date(), useCount: 1,
+        pinned: false, tags: [], meta: [:]
+    )
+    let rowDefault = ClipRowView(item: item, selected: false, language: .zhHans, theme: .default)
+    let rowDracula = ClipRowView(item: item, selected: false, language: .zhHans, theme: .dracula)
+    let rowDefault2 = ClipRowView(item: item, selected: false, language: .zhHans, theme: .default)
+
+    runner.expectEqual(rowDefault, rowDefault2, "相同主题与状态的 ClipRowView 相等")
+    runner.expectFalse(rowDefault == rowDracula, "不同主题的 ClipRowView 不相等，能触发界面差分重绘")
+}
+
+runner.run("UpdateManager 多版本 Appcast 解析取最高版本") {
+    let xml = """
+    <?xml version="1.0" encoding="utf-8"?>
+    <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+      <channel>
+        <item>
+          <title>Version 0.1.0</title>
+          <description><![CDATA[<h2>旧版本</h2>]]></description>
+          <enclosure url="https://example.com/ClipMate-0.1.0.dmg" sparkle:version="1" sparkle:shortVersionString="0.1.0" length="1" type="application/octet-stream" />
+        </item>
+        <item>
+          <title>Version 0.3.0</title>
+          <description><![CDATA[<h2>新版本</h2>]]></description>
+          <enclosure url="https://example.com/ClipMate-0.3.0.dmg" sparkle:version="3" sparkle:shortVersionString="0.3.0" length="1" type="application/octet-stream" />
+        </item>
+        <item>
+          <title>Version 0.2.0</title>
+          <description><![CDATA[<h2>中间版本</h2>]]></description>
+          <enclosure url="https://example.com/ClipMate-0.2.0.dmg" sparkle:version="2" sparkle:shortVersionString="0.2.0" length="1" type="application/octet-stream" />
+        </item>
+      </channel>
+    </rss>
+    """
+    let parsed = UpdateManager.shared.parseAppcast(data: Data(xml.utf8))
+    runner.expectEqual(parsed?.version ?? "", "0.3.0", "多个 item 中取版本号最高的一条")
+    runner.expectEqual(
+        parsed?.downloadURL.absoluteString ?? "",
+        "https://example.com/ClipMate-0.3.0.dmg",
+        "下载链接取自最高版本条目"
+    )
+    runner.expectTrue(parsed?.notes.contains("新版本") == true, "更新说明取自最高版本条目")
+    runner.expectTrue(
+        UpdateManager.shared.parseAppcast(data: Data("<rss></rss>".utf8)) == nil,
+        "无 item 的 feed 返回 nil"
+    )
+}
+
+runner.run("ClipStore 语义检索运行时开关") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    runner.expectTrue(store.embeddingProvider == nil, "默认未挂载向量生成器")
+
+    _ = try store.capture(
+        kind: .text, plainText: "语义开关测试内容", sourceBundle: "test", sourceName: "Test"
+    )
+    runner.expectTrue(store.search(query: "语义开关").count == 1, "未开启语义检索时关键词仍可命中")
+
+    store.setEmbeddingProvider { text in EmbeddingService.embed(text: text) }
+    runner.expectTrue(store.embeddingProvider != nil, "运行中挂载后生成器可用")
+
+    store.setEmbeddingProvider(nil)
+    runner.expectTrue(store.embeddingProvider == nil, "运行中卸载后生成器为 nil")
+    runner.expectTrue(store.search(query: "语义开关").count == 1, "卸载后检索自动退回纯文本路径")
 }
 
 print("----")
