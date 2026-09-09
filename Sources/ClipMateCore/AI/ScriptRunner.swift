@@ -41,8 +41,14 @@ public enum ScriptRunner {
     public static func run(_ script: ScriptAction, input text: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = ["-c", script.command]
+            switch script.type {
+            case .shortcut:
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+                process.arguments = ["run", script.command]
+            case .shell:
+                process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                process.arguments = ["-c", script.command]
+            }
 
             let stdin = Pipe()
             let stdout = Pipe()

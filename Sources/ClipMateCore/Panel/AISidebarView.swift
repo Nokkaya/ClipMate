@@ -6,6 +6,7 @@ public struct AISidebarView: View {
     @ObservedObject var viewModel: PanelViewModel
     @ObservedObject var model: AIWorkspaceModel
     @State private var copiedMessageID: UUID?
+    @FocusState private var isInputFocused: Bool
 
     public init(viewModel: PanelViewModel, model: AIWorkspaceModel) {
         self.viewModel = viewModel
@@ -35,15 +36,9 @@ public struct AISidebarView: View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color.purple, Color.indigo, Color.blue],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .foregroundStyle(Color.accentColor)
 
-            Text("AI 问答")
+            Text(L10n.tr("ai.sidebar_title"))
                 .font(.system(size: 13, weight: .semibold))
 
             Text(model.statusText)
@@ -60,22 +55,18 @@ public struct AISidebarView: View {
                     model.clearChat()
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
-                .help("重置会话并清空历史")
+                .clipMateIconButton(size: 22)
+                .help(L10n.tr("ai.tip_clear_chat"))
             }
 
             Button {
                 viewModel.toggleAISidebar()
             } label: {
                 Image(systemName: "sidebar.right")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .help("收起 AI 侧边栏 (⌘K / ⌘⇧A)")
+            .clipMateIconButton(size: 22)
+            .help(L10n.tr("ai.tip_collapse_sidebar"))
         }
     }
 
@@ -93,7 +84,7 @@ public struct AISidebarView: View {
                         .font(.system(size: 11, weight: .medium))
                         .lineLimit(1)
                     Spacer()
-                    Text("\(sourceText(item).count) 字")
+                    Text(L10n.tr("meta.chars_unit", sourceText(item).count))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                     Text(TimeHelper.relative(item.createdAt))
@@ -117,7 +108,7 @@ public struct AISidebarView: View {
             HStack {
                 Image(systemName: "hand.point.left")
                     .font(.system(size: 11))
-                Text("在左侧列表选择条目以分析与问答")
+                Text(L10n.tr("ai.select_item_hint"))
                     .font(.system(size: 11))
             }
             .foregroundStyle(.tertiary)
@@ -129,7 +120,7 @@ public struct AISidebarView: View {
         let content = item.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
         if content.isEmpty {
             var text = item.displayText
-            if item.kind == .image { text += "（图片条目：可提问图中的识别文字）" }
+            if item.kind == .image { text += " " + L10n.tr("ai.image_ocr_hint") }
             return text
         }
         return String(content.prefix(1600))
@@ -138,34 +129,42 @@ public struct AISidebarView: View {
     // MARK: - 快捷功能芯片栏
 
     private var actionChips: some View {
-        FlowLayout(spacing: 5, rowSpacing: 5) {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3),
+            spacing: 5
+        ) {
             ForEach(allTemplates) { template in
-                Button {
+                chipButton {
                     model.runTemplate(template)
-                } label: {
-                    Label(template.name, systemImage: template.icon)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
+                } content: {
+                    Label(L10n.templateName(template.id, defaultName: template.name), systemImage: template.icon)
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isRunning || model.item == nil)
             }
 
             ForEach(model.scriptList) { script in
-                Button {
+                chipButton {
                     model.runScript(script)
-                } label: {
-                    Label(script.name, systemImage: "terminal")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
+                } content: {
+                    Label(L10n.scriptName(script), systemImage: script.type == .shortcut ? "bolt.horizontal.fill" : script.icon)
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isRunning || model.item == nil)
             }
         }
         .padding(.vertical, 1)
+    }
+
+    /// 等宽芯片按钮：统一宽度与左对齐，避免长短不一导致换行错落。
+    private func chipButton<Content: View>(
+        action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Button(action: action) {
+            content()
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .clipMateAIChip()
+        .disabled(model.isRunning || model.item == nil)
     }
 
     private var allTemplates: [PromptTemplate] {
@@ -222,10 +221,10 @@ public struct AISidebarView: View {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .font(.system(size: 26))
                 .foregroundStyle(.tertiary)
-            Text("向 AI 提问 / 连续追问")
+            Text(L10n.tr("ai.empty_chat_title"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text("点击上方快捷模板，或在下方输入框自由提问。\n支持多轮连续追问与代码/文本分析。")
+            Text(L10n.tr("ai.empty_chat_subtitle"))
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -257,8 +256,8 @@ public struct AISidebarView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.purple)
-                    Text("AI 回复")
+                        .foregroundStyle(Color.accentColor)
+                    Text(L10n.tr("ai.response_title"))
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -272,7 +271,7 @@ public struct AISidebarView: View {
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: copiedMessageID == msg.id ? "checkmark" : "doc.on.doc")
-                                Text(copiedMessageID == msg.id ? "已复制" : "复制")
+                                Text(copiedMessageID == msg.id ? L10n.tr("action.copied") : L10n.tr("action.copy"))
                             }
                             .font(.system(size: 9.5))
                             .foregroundStyle(copiedMessageID == msg.id ? Color.green : Color.secondary)
@@ -286,7 +285,7 @@ public struct AISidebarView: View {
                         ProgressView()
                             .controlSize(.small)
                             .scaleEffect(0.7)
-                        Text("正在思考分析中…")
+                        Text(L10n.tr("ai.thinking"))
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
@@ -324,24 +323,66 @@ public struct AISidebarView: View {
     // MARK: - 提问输入栏
 
     private var promptBar: some View {
-        HStack(spacing: 6) {
-            TextField(model.chatHistory.isEmpty ? "向 AI 自由提问当前剪贴板（⏎ 发送）…" : "连续追问…", text: $model.customPrompt)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11.5))
-                .onSubmit {
-                    submitQuestion()
-                }
+        HStack(spacing: 7) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(isInputFocused ? Color.accentColor : Color.secondary.opacity(0.6))
+                .padding(.leading, 3)
 
-            Button {
+            TextField(
+                model.chatHistory.isEmpty ? L10n.tr("ai.prompt_placeholder_new") : L10n.tr("ai.prompt_placeholder_followup"),
+                text: $model.customPrompt
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .focused($isInputFocused)
+            .onSubmit {
                 submitQuestion()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(model.customPrompt.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary.opacity(0.5) : Color.accentColor)
             }
-            .buttonStyle(.plain)
-            .disabled(model.isRunning || model.item == nil || model.customPrompt.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            if model.isRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.75)
+                    .frame(width: 22, height: 22)
+            } else {
+                let hasText = !model.customPrompt.trimmingCharacters(in: .whitespaces).isEmpty
+                Button {
+                    submitQuestion()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(hasText ? Color.accentColor : Color.primary.opacity(0.06))
+                            .frame(width: 22, height: 22)
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(hasText ? Color.white : Color.secondary.opacity(0.45))
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(model.isRunning || model.item == nil || !hasText)
+                .help(L10n.tr("ai.tip_send"))
+            }
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(isInputFocused ? 0.05 : 0.03))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(
+                    isInputFocused ? Color.accentColor.opacity(0.45) : Color.primary.opacity(0.09),
+                    lineWidth: 0.8
+                )
+        }
+        .shadow(
+            color: isInputFocused ? Color.accentColor.opacity(0.12) : .clear,
+            radius: 4,
+            y: 1
+        )
+        .animation(.easeInOut(duration: 0.16), value: isInputFocused)
     }
 
     private func submitQuestion() {
@@ -355,15 +396,12 @@ public struct AISidebarView: View {
         HStack(spacing: 6) {
             Spacer()
             if model.hasResult {
-                Button("复制最新") { model.copyResult() }
-                    .font(.system(size: 10.5))
-                    .buttonStyle(.bordered)
-                Button("存为新条目") { model.replaceAsNewItem() }
-                    .font(.system(size: 10.5))
-                    .buttonStyle(.bordered)
-                Button("直接粘贴 ⏎") { model.pasteResult() }
-                    .font(.system(size: 10.5))
-                    .buttonStyle(.borderedProminent)
+                Button(L10n.tr("ai.copy_latest")) { model.copyResult() }
+                    .clipMateGlass(size: .small)
+                Button(L10n.tr("ai.save_as_new")) { model.replaceAsNewItem() }
+                    .clipMateGlass(size: .small)
+                Button(L10n.tr("ai.direct_paste")) { model.pasteResult() }
+                    .clipMateAccent(size: .small)
             }
         }
     }
