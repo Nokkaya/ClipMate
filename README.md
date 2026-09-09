@@ -21,6 +21,7 @@
 | 去重 | SHA256 内容哈希命中则复用同一条目，`use_count + 1` 并上浮 |
 | 智能标题 | 本地规则识别色值 / Markdown 标题 / CLI 命令 / SQL / 代码签名 / JSON 摘要，生成可读标题（可关） |
 | 自动标签 | 链接、邮箱、颜色、代码、JSON、长文本等，纯本地规则引擎，只扫描前 16KB |
+| 号码识别 | 手机号 / 银行卡（Luhn 校验）/ 身份证（校验位）/ 快递单号 / IP / 金额 / 纯数字，自动打标签并可一键过滤 |
 | 图片 OCR | Vision 文字识别（中英混合），结果入库可检索（可关） |
 | 链接元数据 | 后台抓取网页 `<title>` 与 favicon（2.5s 超时，失败静默降级）（可关） |
 | 容量上限 | 单条默认 20MB，可调 1–100MB；超限跳过 |
@@ -30,7 +31,10 @@
 - **全文检索**：SQLite FTS5（外部内容表 + 触发器同步）。拉丁文走前缀匹配；含 CJK 的查询自动降级为 `LIKE` 子串匹配，保证中文命中。FTS5 不可用时全局降级 LIKE。
 - **语义检索**：系统 `NLEmbedding` 句向量，零网络零成本。查询向量与库内向量做余弦相似度（阈值 0.28），与关键词结果按 **RRF（k=60）** 融合排序，固定条目额外加权。存量向量启动时后台补算（每轮 2000 条、每批 50 条），采集后单条防抖补算。
 - **关键词高亮**：标题、正文与预览页均高亮命中词。
-- **分类过滤**：全部 / 文本 / 图片 / 文件 / 链接 / 片段 / 固定，7 个 chip，`Tab` 循环切换。
+- **分类过滤**：全部 / 文本 / 图片 / 文件 / 链接 / 片段 / 固定 / **号码**，8 个 chip，`Tab` 循环切换。
+- **情境过滤**：按**来源应用**与**时间范围**（今天 / 昨天 / 最近 3 天 / 本周 / 本月）筛选——「我记得是昨天从微信复制的」可以直接点出来。
+- **检索语法**：`#11`（恰好 11 位数字）、`#>8` / `#<12`（位数区间）、`len:>10`、`app:微信`、`before:昨天`、`after:2026-09-01`、`138*`（前缀），可叠加；悬停搜索框可查看提示。
+- **号码友好**：号码按 3-4-4 / 4 位分组展示并放大等宽显示；同一号码的不同写法（`138 1234 5678` 与 `13812345678`）自动归并为一条。
 - **片段短码**：输入 `/` 召回全部片段，`/email` 精确置顶。
 
 ### 粘贴与批量
@@ -110,6 +114,7 @@
 | `⌘K` / `⌘⇧A` | 展开 / 收起 AI 侧边栏 |
 | `⌘I` | 详情预览 |
 | `⌘P` | 固定 / 取消固定（多选时批量固定） |
+| `⌘R` | 重命名条目（自定义标题，之后可按名字搜到） |
 | `⌘A` | 全选可见条目（搜索框为空时） |
 | `⌘C` | 复制选中条目（搜索框为空时） |
 | `⌫` | 删除选中（多选时批量删除；搜索框为空时生效） |
@@ -169,9 +174,9 @@ Sources/
 ├── ClipMate/main.swift          # 可执行壳（accessory 策略，无 Dock 图标）
 └── ClipMateCore/                # 库目标（可被测试链接）
     ├── Model/       ClipItem / ClipKind / FilterKind
-    ├── Store/       Database(SQLite3 封装) / Migrations / ClipStore
+    ├── Store/       Database(SQLite3 封装) / Migrations / ClipStore / SearchQuery
     ├── Capture/     ClipboardMonitor / ClipboardReader / BlobStore
-    │                AutoTagger / SmartTitleGenerator / URLMetadataFetcher
+    │                AutoTagger / NumberRecognizer / SmartTitleGenerator / URLMetadataFetcher
     ├── Paste/       PasteBack(快照 + CGEvent) / FrontAppTracker
     ├── Hotkey/      HotkeyManager（Carbon 全局热键）
     ├── Panel/       PanelController / PanelView / ClipRowView / PanelViewModel
@@ -191,7 +196,7 @@ Sources/
 - **线程模型**：主线程只做 UI；采集在 `clipmate.capture` 串行队列，OCR 在 `clipmate.ocr`，向量补算在 `clipmate.embedding`（独立数据库连接，利用 WAL 多连接避免与主线程查询争锁）。
 - **粘贴目标记录**：面板唤起会激活自身，因此 `FrontAppTracker` 在唤起**之前**记录前台应用 PID，作为回写目标。
 - **窗口行为**：`NSPanel`（`.borderless` + `.nonactivatingPanel`），不抢焦点；窗口本身透明无阴影，阴影由 SwiftUI 在窗口内绘制，避免内容变化触发系统阴影重算。
-- **迁移机制**：`PRAGMA user_version`，当前为 **v3**（v1 建表 + FTS5；v2 增 `embedding` 列；v3 以 `plain_text, title` 两列重建 FTS 索引并全量回填）。
+- **迁移机制**：`PRAGMA user_version`，当前为 **v4**（v1 建表 + FTS5；v2 增 `embedding` 列；v3 以 `plain_text, title` 两列重建 FTS 索引并全量回填；v4 增 `num_key` 号码归一化键，存量数据启动后后台回填）。
 
 ### 数据存储
 
@@ -260,7 +265,7 @@ Sources/
 swift run ClipMateTests
 ```
 
-本环境仅安装 Command Line Tools（无 XCTest），测试以自研 runner 形式实现，当前 **48 个用例全部通过**，覆盖：
+本环境仅安装 Command Line Tools（无 XCTest），测试以自研 runner 形式实现，当前 **55 个用例全部通过**，覆盖：
 
 - 采集与去重、分类过滤、固定与保留策略、编辑后检索、清空保留固定
 - 图片 / PDF 落盘与清理、缩略图自适应压缩、异步 OCR 补全
