@@ -21,8 +21,6 @@ final class PanelController {
     let viewModel: PanelViewModel
     let frontApps: FrontAppTracker
     var onOpenSettings: (() -> Void)?
-    /// AI 工作台独立窗口（⌘K），由 AppModel 装配注入。
-    weak var aiWorkspace: AIWorkspaceController?
 
     private var keyMonitor: Any?
     private var resignKeyObserver: NSObjectProtocol?
@@ -63,8 +61,6 @@ final class PanelController {
             object: panel,
             queue: .main
         ) { [weak self] _ in
-            // AI 工作台窗口获得 key 时不隐藏主面板（两者并排使用）
-            if NSApp.keyWindow === self?.aiWorkspace?.panel { return }
             self?.hidePanel()
         }
 
@@ -119,14 +115,6 @@ final class PanelController {
         if NSApp.isActive {
             NSApp.hide(nil) // 焦点还给上一个应用
         }
-    }
-
-    /// AI 工作台关闭后把 key 还给主面板（若仍可见）。
-    func reassertKey() {
-        guard panel.isVisible else { return }
-        installKeyMonitor()
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func positionPanel() {
@@ -202,7 +190,31 @@ final class PanelController {
         }
 
         let newFrame = NSRect(x: newX, y: newY, width: targetWidth, height: targetHeight)
-        panel.setFrame(newFrame, display: true, animate: animated)
+        if animated {
+            if isOpen {
+                // 展开时：由于窗口底色全透明（.clear），立即将透明画板拓宽到 940，
+                // 彻底消除窗口服务器重分配 backing store 和连续缩放时的卡顿与左侧抖动；
+                // 若靠近屏幕右侧需要平移，则平移动画
+                if newX != frame.origin.x {
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = 0.25
+                        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                        context.allowsImplicitAnimation = true
+                        self.panel.animator().setFrame(newFrame, display: true)
+                    }
+                } else {
+                    panel.setFrame(newFrame, display: true)
+                }
+            } else {
+                // 收起时：等 SwiftUI 卡片在 0.25s 内平滑收回至 440px 后，再将透明窗口尺寸还原为 500
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) { [weak self] in
+                    guard let self = self, !self.viewModel.isAISidebarOpen else { return }
+                    self.panel.setFrame(newFrame, display: true)
+                }
+            }
+        } else {
+            panel.setFrame(newFrame, display: true)
+        }
     }
 
     // MARK: - 键盘（键盘优先交互的核心）
@@ -233,6 +245,11 @@ final class PanelController {
         // 编辑浮层：除 Esc 外放行给 TextEditor
         if viewModel.showEditOverlay {
             if event.keyCode == 53 { viewModel.showEditOverlay = false; return true }
+            return false
+        }
+        // 片段编辑浮层：除 Esc 外放行给表单控件
+        if viewModel.showSnippetOverlay {
+            if event.keyCode == 53 { viewModel.showSnippetOverlay = false; return true }
             return false
         }
         // 确认清空浮层
@@ -291,11 +308,9 @@ final class PanelController {
                 return true
             }
             return false
-        case 53: // Esc：清多选 → 预览 → 收起 AI 侧边栏 → 清搜索词 → 隐藏
+        case 53: // Esc：清多选 → 收起 AI 侧边栏 → 清搜索词 → 隐藏（预览/浮层已在前面拦截）
             if viewModel.multiSelectedIDs.count > 0 {
                 viewModel.clearMultiSelection()
-            } else if viewModel.previewItem != nil {
-                viewModel.previewItem = nil
             } else if viewModel.isAISidebarOpen {
                 viewModel.toggleAISidebar()
             } else if !viewModel.query.isEmpty {

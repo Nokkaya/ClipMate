@@ -6,17 +6,25 @@ struct PanelView: View {
     @ObservedObject var viewModel: PanelViewModel
 
     var body: some View {
-        panelCard
-            .frame(width: viewModel.isAISidebarOpen ? 940 : 500, height: 580) // 窗口留边给阴影绘制
+        ZStack(alignment: .topLeading) {
+            panelCard
+                .padding(.leading, 30)
+                .padding(.top, 30)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var panelCard: some View {
-        ZStack {
+        ZStack(alignment: .leading) {
             HStack(spacing: 0) {
                 // 左侧：剪贴板列表主区域（瘦身 1/3：从 660px 缩减为 440px）
                 VStack(spacing: 0) {
                     SearchBar(viewModel: viewModel)
                     FilterChips(viewModel: viewModel)
+                    // 片段分类下展示分组栏（全部 / 各分组 / 新建片段）
+                    if viewModel.filter == .snippet {
+                        SnippetGroupBar(viewModel: viewModel)
+                    }
                     Divider().overlay(Color.primary.opacity(0.08))
                     if viewModel.items.isEmpty {
                         EmptyStateView(query: viewModel.query)
@@ -27,35 +35,54 @@ struct PanelView: View {
                     if viewModel.multiSelectedIDs.count > 1 {
                         BatchActionBar(viewModel: viewModel)
                     } else {
-                        FooterBar()
+                        FooterBar(settings: viewModel.settings)
                     }
                 }
                 .frame(width: 440)
 
-                // 右侧：内置 AI 问答侧边栏（可选平滑展开）
-                if viewModel.isAISidebarOpen {
-                    Divider().overlay(Color.primary.opacity(0.12))
-                    AISidebarView(viewModel: viewModel, model: viewModel.aiModel)
-                        .frame(width: 439)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
+                // 右侧：内置 AI 问答侧边栏（平滑展开）
+                Divider().overlay(Color.primary.opacity(0.12))
+                AISidebarView(viewModel: viewModel, model: viewModel.aiModel)
+                    .frame(width: 439)
+                    .opacity(viewModel.isAISidebarOpen ? 1 : 0)
             }
+            .frame(width: 880, alignment: .leading)
             .disabled(viewModel.showEditOverlay || viewModel.showSnippetOverlay || viewModel.showConfirmClear || viewModel.previewItem != nil)
 
-            if viewModel.showEditOverlay { EditOverlay(viewModel: viewModel) }
-            if viewModel.showSnippetOverlay { SnippetEditOverlay(viewModel: viewModel) }
-            if viewModel.showConfirmClear { ConfirmClearOverlay(viewModel: viewModel) }
-            if viewModel.previewItem != nil { PreviewOverlay(viewModel: viewModel) }
+            if viewModel.showEditOverlay {
+                EditOverlay(viewModel: viewModel)
+                    .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
+            }
+            if viewModel.showSnippetOverlay {
+                SnippetEditOverlay(viewModel: viewModel)
+                    .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
+            }
+            if viewModel.showConfirmClear {
+                ConfirmClearOverlay(viewModel: viewModel)
+                    .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
+            }
+            if viewModel.previewItem != nil {
+                PreviewOverlay(viewModel: viewModel)
+                    .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
+            }
         }
-        .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
-        .background(VisualEffectBackground())
+        .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520, alignment: .leading)
+        .background(
+            ZStack {
+                VisualEffectBackground()
+                if let tint = viewModel.settings.appTheme.backgroundTint {
+                    tint
+                }
+            }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+                .strokeBorder(viewModel.settings.appTheme.borderColor, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: viewModel.isAISidebarOpen)
+        .preferredColorScheme(viewModel.settings.appTheme.preferredColorScheme)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.isAISidebarOpen)
     }
 }
 
@@ -69,7 +96,7 @@ struct SearchBar: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField(L10n.tr("search.placeholder"), text: $viewModel.query)
+            TextField(L10n.tr("search.placeholder", lang: viewModel.settings.appLanguage), text: $viewModel.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($focused)
@@ -80,11 +107,11 @@ struct SearchBar: View {
                     viewModel.reload()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .clipMateIconButton(size: 20)
             }
 
+            let theme = viewModel.settings.appTheme
             // AI 问答侧边栏快速展开/收起切换按钮
             Button {
                 viewModel.toggleAISidebar()
@@ -99,16 +126,16 @@ struct SearchBar: View {
                 .padding(.vertical, 3.5)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(viewModel.isAISidebarOpen ? Color.purple.opacity(0.18) : Color.primary.opacity(0.06))
+                        .fill(viewModel.isAISidebarOpen ? theme.accent.opacity(0.18) : Color.primary.opacity(0.06))
                 )
-                .foregroundStyle(viewModel.isAISidebarOpen ? Color.purple : Color.secondary)
+                .foregroundStyle(viewModel.isAISidebarOpen ? theme.accent : Color.secondary)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(viewModel.isAISidebarOpen ? Color.purple.opacity(0.5) : Color.clear, lineWidth: 1)
+                        .strokeBorder(viewModel.isAISidebarOpen ? theme.accent.opacity(0.4) : Color.clear, lineWidth: 1)
                 )
             }
             .buttonStyle(.plain)
-            .help("展开/收起 AI 问答侧边栏 (⌘K / ⌘⇧A)")
+            .help(L10n.tr("search.help", lang: viewModel.settings.appLanguage))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -134,106 +161,110 @@ struct FilterChips: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                ForEach(FilterKind.allCases, id: \.self) { kind in
-                    Button {
-                        viewModel.changeFilter(kind)
-                    } label: {
-                        Text(kind.title)
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(
-                                Capsule().fill(
-                                    viewModel.filter == kind
-                                        ? Color.accentColor.opacity(0.18)
-                                        : Color.primary.opacity(0.06)
-                                )
-                            )
-                            .overlay(
-                                Capsule().strokeBorder(
-                                    viewModel.filter == kind ? Color.accentColor.opacity(0.45) : .clear,
-                                    lineWidth: 1
-                                )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(viewModel.filter == kind ? Color.accentColor : Color.secondary)
-                }
-                Spacer()
-                if !viewModel.queue.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "list.number")
-                        Text("队列 \(viewModel.queue.count)")
-                        Button {
-                            viewModel.clearQueue()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill").font(.system(size: 9))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-                    .help("按 ⌘⇧⏎ 顺序粘贴队列内容")
-                }
-                if settings.pauseCapture {
-                    Label("已暂停采集", systemImage: "pause.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
+        HStack(spacing: 4) {
+            ForEach(FilterKind.allCases) { kind in
+                FilterChip(kind: kind, selected: viewModel.filter == kind, lang: settings.appLanguage) {
+                    viewModel.changeFilter(kind)
                 }
             }
-
-            if viewModel.filter == .snippet {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
-                        Button {
-                            viewModel.changeSnippetGroup(nil)
-                        } label: {
-                            Text("全部片段")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2.5)
-                                .background(Capsule().fill(viewModel.snippetGroup == nil ? Color.purple.opacity(0.22) : Color.primary.opacity(0.06)))
-                                .foregroundStyle(viewModel.snippetGroup == nil ? Color.purple : Color.secondary)
-                        }
-                        .buttonStyle(.plain)
-
-                        ForEach(viewModel.availableSnippetGroups, id: \.self) { group in
-                            Button {
-                                viewModel.changeSnippetGroup(group)
-                            } label: {
-                                Text(group)
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2.5)
-                                    .background(Capsule().fill(viewModel.snippetGroup == group ? Color.purple.opacity(0.22) : Color.primary.opacity(0.06)))
-                                    .foregroundStyle(viewModel.snippetGroup == group ? Color.purple : Color.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        Button {
-                            viewModel.openNewSnippet()
-                        } label: {
-                            Label("新建片段", systemImage: "plus")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2.5)
-                                .background(Capsule().strokeBorder(Color.purple.opacity(0.4), lineWidth: 1))
-                                .foregroundStyle(Color.purple)
-                        }
-                        .buttonStyle(.plain)
-                    }
+            Spacer()
+            if settings.pauseCapture {
+                HStack(spacing: 3) {
+                    Circle().fill(Color.orange).frame(width: 6, height: 6)
+                    Text(L10n.tr("filter.paused", lang: settings.appLanguage))
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.orange)
                 }
-                .modernScrollbar()
+                .padding(.trailing, 4)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.bottom, 8)
+        .padding(.vertical, 4)
+    }
+}
+
+private struct FilterChip: View {
+    let kind: FilterKind
+    let selected: Bool
+    var lang: AppLanguage = .system
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: kind.systemImage)
+                    .font(.system(size: 10))
+                Text(L10n.filterTitle(kind, lang: lang))
+                    .font(.system(size: 11, weight: selected ? .medium : .regular))
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+            )
+            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 常用片段子分组栏
+
+struct SnippetGroupBar: View {
+    @ObservedObject var viewModel: PanelViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Button {
+                    viewModel.changeSnippetGroup(nil)
+                } label: {
+                    Text(L10n.tr("snippets.all_groups", lang: viewModel.settings.appLanguage))
+                        .font(.system(size: 10.5, weight: viewModel.snippetGroup == nil ? .semibold : .regular))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(viewModel.snippetGroup == nil ? Palette.snippet.opacity(0.18) : Color.primary.opacity(0.06)))
+                        .foregroundStyle(viewModel.snippetGroup == nil ? Palette.snippet : Color.secondary)
+                }
+                .buttonStyle(.plain)
+
+                ForEach(viewModel.availableSnippetGroups, id: \.self) { group in
+                    Button {
+                        viewModel.changeSnippetGroup(group)
+                    } label: {
+                        Text(group)
+                            .font(.system(size: 10.5, weight: viewModel.snippetGroup == group ? .semibold : .regular))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2.5)
+                            .background(Capsule().fill(viewModel.snippetGroup == group ? Palette.snippet.opacity(0.18) : Color.primary.opacity(0.06)))
+                            .foregroundStyle(viewModel.snippetGroup == group ? Palette.snippet : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    viewModel.openNewSnippet()
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .bold))
+                        Text(L10n.tr("snippets.new", lang: viewModel.settings.appLanguage))
+                            .font(.system(size: 10))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2.5)
+                    .background(Capsule().strokeBorder(Palette.snippet.opacity(0.35), lineWidth: 1))
+                    .foregroundStyle(Palette.snippet)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 3)
+        }
     }
 }
 
@@ -256,7 +287,9 @@ struct ClipList: View {
                             selected: item.id == viewModel.selectedID,
                             multiSelected: viewModel.multiSelectedIDs.contains(item.id),
                             thumbnail: viewModel.thumbnail(for: item),
-                            searchHighlight: viewModel.query
+                            searchHighlight: viewModel.query,
+                            language: viewModel.settings.appLanguage,
+                            theme: viewModel.settings.appTheme
                         )
                         .equatable()
 
@@ -297,42 +330,42 @@ struct ContextMenuItems: View {
     let item: ClipItem
 
     var body: some View {
-        Button("粘贴") { viewModel.paste(item: item) }
-        Button("粘贴为纯文本") { viewModel.pasteAsPlainText(item: item) }
-        Button("复制") { viewModel.copy(item: item) }
-        Button("复制为纯文本") { viewModel.copyAsPlainText(item: item) }
-        Button(item.pinned ? "取消固定" : "固定 ★") { viewModel.togglePin(item) }
+        Button(L10n.tr("action.paste")) { viewModel.paste(item: item) }
+        Button(L10n.tr("action.paste_plain")) { viewModel.pasteAsPlainText(item: item) }
+        Button(L10n.tr("action.copy")) { viewModel.copy(item: item) }
+        Button(L10n.tr("action.copy_plain")) { viewModel.copyAsPlainText(item: item) }
+        Button(item.pinned ? L10n.tr("action.unpin") : L10n.tr("action.pin")) { viewModel.togglePin(item) }
         if item.isSnippet {
-            Button("编辑片段…") { viewModel.openEditSnippet(item: item) }
-            Button("移出片段") { viewModel.toggleSnippet(item: item) }
+            Button(L10n.tr("action.edit_snippet")) { viewModel.openEditSnippet(item: item) }
+            Button(L10n.tr("action.remove_snippet")) { viewModel.toggleSnippet(item: item) }
         } else {
-            Button("存为片段…") { viewModel.openEditSnippet(item: item) }
+            Button(L10n.tr("action.save_snippet")) { viewModel.openEditSnippet(item: item) }
         }
         if item.kind != .image {
-            Button("编辑…") { viewModel.beginEdit(item: item) }
+            Button(L10n.tr("action.edit_item")) { viewModel.beginEdit(item: item) }
         }
-        Button("详情预览") { viewModel.togglePreview(item: item) }
-        Button(viewModel.queue.contains { $0.id == item.id } ? "移出粘贴队列" : "加入粘贴队列") {
+        Button(L10n.tr("action.preview")) { viewModel.togglePreview(item: item) }
+        Button(viewModel.queue.contains { $0.id == item.id } ? L10n.tr("action.queue_remove") : L10n.tr("action.queue_add")) {
             _ = viewModel.toggleQueue(item: item)
         }
-        Button("AI 操作…") { viewModel.openAI(item: item) }
+        Button(L10n.tr("action.ai_actions")) { viewModel.openAI(item: item) }
         Divider()
         if viewModel.multiSelectedIDs.count > 1 {
-            Button("合并复制选中的 \(viewModel.multiSelectedIDs.count) 条") {
+            Button(L10n.tr("batch.copy_count", viewModel.multiSelectedIDs.count)) {
                 viewModel.copyMulti()
             }
-            Button("批量固定 / 取消固定") {
+            Button(L10n.tr("batch.toggle_pin")) {
                 viewModel.togglePinMulti()
             }
-            Button("批量加入粘贴队列") {
+            Button(L10n.tr("batch.add_queue")) {
                 viewModel.enqueueMulti()
             }
-            Button("删除选中的 \(viewModel.multiSelectedIDs.count) 条", role: .destructive) {
+            Button(L10n.tr("batch.delete_count", viewModel.multiSelectedIDs.count), role: .destructive) {
                 viewModel.deleteMulti()
             }
             Divider()
         }
-        Button("删除", role: .destructive) { viewModel.delete(item: item) }
+        Button(L10n.tr("action.delete"), role: .destructive) { viewModel.delete(item: item) }
     }
 }
 
@@ -360,15 +393,17 @@ struct EmptyStateView: View {
 // MARK: - 底部快捷键提示
 
 struct FooterBar: View {
+    @ObservedObject var settings: AppSettings
+
     var body: some View {
         HStack(spacing: 8) {
-            KeyHint("⏎", L10n.tr("footer.paste"))
-            KeyHint("⌘⏎", L10n.tr("footer.copy"))
-            KeyHint("⌘I", L10n.tr("footer.preview"))
-            KeyHint("⌘K", "AI")
-            KeyHint("⌫", L10n.tr("footer.delete"))
+            KeyHint("⏎", L10n.tr("footer.paste", lang: settings.appLanguage))
+            KeyHint("⌘⏎", L10n.tr("footer.copy", lang: settings.appLanguage))
+            KeyHint("⌘I", L10n.tr("footer.preview", lang: settings.appLanguage))
+            KeyHint("⌘K", L10n.tr("footer.ai", lang: settings.appLanguage))
+            KeyHint("⌫", L10n.tr("footer.delete", lang: settings.appLanguage))
             Spacer()
-            KeyHint("Esc", L10n.tr("batch.cancel"))
+            KeyHint("Esc", L10n.tr("footer.cancel", lang: settings.appLanguage))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -407,7 +442,7 @@ struct BatchActionBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(L10n.tr("batch.selected", viewModel.multiSelectedIDs.count))
+            Text(L10n.tr("batch.selected", viewModel.multiSelectedIDs.count, lang: viewModel.settings.appLanguage))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
 
@@ -416,52 +451,41 @@ struct BatchActionBar: View {
             Button {
                 viewModel.copyMulti()
             } label: {
-                Label(L10n.tr("batch.copy_all"), systemImage: "doc.on.doc")
-                    .font(.system(size: 11))
+                Label(L10n.tr("batch.copy_all", lang: viewModel.settings.appLanguage), systemImage: "doc.on.doc")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            .clipMateAccent(size: .small)
 
             Button {
                 viewModel.togglePinMulti()
             } label: {
-                Label(L10n.tr("batch.pin_all"), systemImage: "pin")
-                    .font(.system(size: 11))
+                Label(L10n.tr("batch.pin_all", lang: viewModel.settings.appLanguage), systemImage: "pin")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .clipMateGlass(size: .small)
 
             Button {
                 viewModel.enqueueMulti()
             } label: {
-                Label(L10n.tr("batch.paste_queue"), systemImage: "list.number")
-                    .font(.system(size: 11))
+                Label(L10n.tr("batch.paste_queue", lang: viewModel.settings.appLanguage), systemImage: "list.number")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .clipMateGlass(size: .small)
 
             Button(role: .destructive) {
                 viewModel.deleteMulti()
             } label: {
-                Label(L10n.tr("batch.delete_all"), systemImage: "trash")
-                    .font(.system(size: 11))
+                Label(L10n.tr("batch.delete_all", lang: viewModel.settings.appLanguage), systemImage: "trash")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .clipMateDanger(prominent: false, size: .small)
 
             Button {
                 viewModel.clearMultiSelection()
             } label: {
-                Label(L10n.tr("batch.cancel"), systemImage: "xmark")
-                    .font(.system(size: 11))
+                Label(L10n.tr("batch.cancel", lang: viewModel.settings.appLanguage), systemImage: "xmark")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .clipMateGlass(size: .small)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
         .background(Color.accentColor.opacity(0.12))
     }
 }
-
 

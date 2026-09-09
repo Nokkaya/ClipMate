@@ -10,13 +10,6 @@ public enum ClipKind: String, CaseIterable, Codable, Sendable {
     case pdf
 
     public var title: String {
-        switch self {
-        case .text: return "文本"
-        case .url: return "链接"
-        case .richText: return "富文本"
-        case .image: return "图片"
-        case .file: return "文件"
-        case .pdf: return "PDF"
-        }
+        L10n.kindTitle(self)
     }
 }

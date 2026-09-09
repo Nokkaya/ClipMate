@@ -92,8 +92,22 @@ public struct ClipItem: Identifiable, Equatable, Sendable {
 }
 
 /// 列表过滤维度（对应 UI 上的分类 chip）。
-public enum FilterKind: String, CaseIterable {
+public enum FilterKind: String, CaseIterable, Identifiable {
     case all, text, image, file, link, snippet, pinned
+
+    public var id: String { rawValue }
+
+    public var systemImage: String {
+        switch self {
+        case .all: return "tray.2"
+        case .text: return "doc.text"
+        case .image: return "photo"
+        case .file: return "folder"
+        case .link: return "link"
+        case .snippet: return "bookmark"
+        case .pinned: return "pin"
+        }
+    }
 
     /// 片段收藏的标记标签。
     public static let snippetTag = "片段"

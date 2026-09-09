@@ -27,15 +27,19 @@ struct PreviewOverlay: View {
                     footer(item)
                 }
                 .padding(14)
-                .frame(width: 580)
-                .background(VisualEffectBackground())
+                .frame(width: viewModel.isAISidebarOpen ? 680 : 396)
+                .background(
+                    ZStack {
+                        VisualEffectBackground()
+                        viewModel.settings.appTheme.backgroundTint
+                    }
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
+                        .strokeBorder(viewModel.settings.appTheme.borderColor, lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.28), radius: 18, y: 6)
-                .padding(14)
                 .task(id: item.id) {
                     previewImage = nil
                     isRawJSON = false
@@ -55,6 +59,7 @@ struct PreviewOverlay: View {
                     }
                 }
             }
+            .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
         }
     }
 
@@ -108,7 +113,7 @@ struct PreviewOverlay: View {
                 HStack(spacing: 3) {
                     Image(systemName: "pin.fill")
                         .font(.system(size: 9))
-                    Text("已固定")
+                    Text(L10n.tr("preview.pinned"))
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .foregroundStyle(Palette.pin)
@@ -122,9 +127,8 @@ struct PreviewOverlay: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .clipMateIconButton(size: 22)
             .keyboardShortcut(.cancelAction)
         }
     }
@@ -173,7 +177,7 @@ struct PreviewOverlay: View {
                         Image(systemName: "photo")
                             .font(.system(size: 28))
                             .foregroundStyle(.tertiary)
-                        Text("图片数据不可用")
+                        Text(L10n.tr("preview.image_unavailable"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -188,11 +192,11 @@ struct PreviewOverlay: View {
             if !item.plainText.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Label("识别到的文本 (Vision OCR)", systemImage: "text.viewfinder")
+                        Label(L10n.tr("preview.ocr_title"), systemImage: "text.viewfinder")
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(Palette.text)
                         Spacer()
-                        Button("复制文字") {
+                        Button(L10n.tr("preview.ocr_copy")) {
                             PasteBack.write(.text(item.plainText))
                             HapticHelper.feedback()
                         }
@@ -239,7 +243,7 @@ struct PreviewOverlay: View {
                         Image(systemName: "doc.richtext")
                             .font(.system(size: 28))
                             .foregroundStyle(.tertiary)
-                        Text("PDF 预览暂不可用")
+                        Text(L10n.tr("preview.pdf_unavailable"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -253,7 +257,7 @@ struct PreviewOverlay: View {
 
             if !item.plainText.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("提取的正文", systemImage: "text.viewfinder")
+                    Label(L10n.tr("preview.pdf_extracted"), systemImage: "text.viewfinder")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(Palette.pdf)
                     ScrollView {
@@ -295,7 +299,7 @@ struct PreviewOverlay: View {
                             .font(.system(size: 13, weight: .semibold))
                             .lineLimit(2)
                     } else {
-                        Text(URL(string: item.plainText)?.host ?? "网页链接")
+                        Text(URL(string: item.plainText)?.host ?? L10n.tr("preview.url_default"))
                             .font(.system(size: 13, weight: .semibold))
                             .lineLimit(1)
                     }
@@ -312,11 +316,10 @@ struct PreviewOverlay: View {
                     Button {
                         NSWorkspace.shared.open(url)
                     } label: {
-                        Label("在浏览器中打开", systemImage: "arrow.up.forward.app")
-                            .font(.system(size: 11, weight: .medium))
+                        Label(L10n.tr("action.open"), systemImage: "arrow.up.forward.app")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .clipMateAccent(size: .small, tint: Palette.url)
+                    .help(L10n.tr("preview.url_open_tip"))
                 }
             }
             .padding(10)
@@ -324,16 +327,15 @@ struct PreviewOverlay: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("完整链接")
+                    Text(L10n.tr("preview.url_full"))
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                     Spacer()
-                    Button("复制链接") {
+                    Button(L10n.tr("preview.url_copy")) {
                         viewModel.copy(item: item)
                         HapticHelper.feedback()
                     }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 10.5))
+                    .clipMateGlass(size: .small)
                 }
 
                 ScrollView {
@@ -357,24 +359,22 @@ struct PreviewOverlay: View {
         let highlighted = SyntaxHighlighter.highlightJSON(item.plainText)
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("JSON 数据", systemImage: "curlybraces")
+                Label(L10n.tr("preview.json_title"), systemImage: "curlybraces")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Palette.url)
                 Spacer()
-                Button(isRawJSON ? "格式化显示" : "原始显示") {
+                Button(isRawJSON ? L10n.tr("preview.json_format") : L10n.tr("preview.json_raw")) {
                     isRawJSON.toggle()
                     HapticHelper.alignment()
                 }
-                .buttonStyle(.borderless)
-                .font(.system(size: 10.5))
+                .clipMateGlass(size: .small)
 
                 if let formatted = highlighted?.formatted {
-                    Button("复制格式化") {
+                    Button(L10n.tr("preview.json_copy")) {
                         PasteBack.write(.text(formatted))
                         HapticHelper.feedback()
                     }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 10.5))
+                    .clipMateGlass(size: .small)
                 }
             }
 
@@ -404,20 +404,19 @@ struct PreviewOverlay: View {
     private func codeSection(_ item: ClipItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("代码高亮", systemImage: "chevron.left.forwardslash.chevron.right")
+                Label(L10n.tr("preview.code_title"), systemImage: "chevron.left.forwardslash.chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Palette.text)
                 Spacer()
                 let lineCount = item.plainText.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
-                Text("\(lineCount) 行")
+                Text(L10n.tr("meta.lines", lineCount))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                Button("复制代码") {
+                Button(L10n.tr("preview.code_copy")) {
                     viewModel.copy(item: item)
                     HapticHelper.feedback()
                 }
-                .buttonStyle(.borderless)
-                .font(.system(size: 10.5))
+                .clipMateGlass(size: .small)
             }
 
             ScrollView {
@@ -450,11 +449,11 @@ struct PreviewOverlay: View {
     private func fileSection(_ item: ClipItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("文件清单", systemImage: "doc.on.doc")
+                Label(L10n.tr("preview.file_title"), systemImage: "doc.on.doc")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Palette.file)
                 Spacer()
-                Text("\(filePaths(item).count) 个项目")
+                Text(L10n.tr("meta.items", filePaths(item).count))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -475,11 +474,9 @@ struct PreviewOverlay: View {
                                 NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
                             } label: {
                                 Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.plain)
-                            .help("在访达中定位文件")
+                            .clipMateIconButton(size: 22)
+                            .help(L10n.tr("preview.file_locate_tip"))
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -497,19 +494,18 @@ struct PreviewOverlay: View {
     private func defaultTextSection(_ item: ClipItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Label("文本正文", systemImage: "text.alignleft")
+                Label(L10n.tr("preview.text_title"), systemImage: "text.alignleft")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(item.plainText.count) 字符")
+                Text(L10n.tr("meta.chars", item.plainText.count))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                Button("复制") {
+                Button(L10n.tr("action.copy")) {
                     viewModel.copy(item: item)
                     HapticHelper.feedback()
                 }
-                .buttonStyle(.borderless)
-                .font(.system(size: 10.5))
+                .clipMateGlass(size: .small)
             }
 
             ScrollView {
@@ -536,135 +532,121 @@ struct PreviewOverlay: View {
 
     // MARK: - 元信息栏
     private func metaGrid(_ item: ClipItem) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             if !item.sourceName.isEmpty {
-                metaCell("来源", item.sourceName)
+                metaCell(L10n.tr("meta.source", lang: viewModel.settings.appLanguage), item.sourceName)
+                    .frame(maxWidth: 80, alignment: .leading)
             }
-            metaCell("时间", TimeHelper.relative(item.createdAt))
-            metaCell("大小", SizeHelper.human(item.byteSize))
+            metaCell(L10n.tr("meta.time", lang: viewModel.settings.appLanguage), L10n.relativeTime(item.createdAt, lang: viewModel.settings.appLanguage))
+            metaCell(L10n.tr("meta.size", lang: viewModel.settings.appLanguage), SizeHelper.human(item.byteSize))
             if item.useCount > 1 {
-                metaCell("使用", "\(item.useCount) 次")
+                metaCell(L10n.tr("meta.used", lang: viewModel.settings.appLanguage), L10n.tr("meta.uses_count", item.useCount, lang: viewModel.settings.appLanguage))
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
             HStack(spacing: 4) {
-                ForEach(item.tags, id: \.self) { tag in
-                    Text(tag)
+                ForEach(item.tags.prefix(2), id: \.self) { tag in
+                    Text(L10n.tagTitle(tag, lang: viewModel.settings.appLanguage))
                         .font(.system(size: 9.5))
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 5)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(item.kind.tintColor.opacity(0.14)))
                         .foregroundStyle(item.kind.tintColor)
+                        .lineLimit(1)
                 }
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
     }
 
     private func metaCell(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
-                .font(.system(size: 9))
+                .font(.system(size: 8.5))
                 .foregroundStyle(.tertiary)
             Text(value)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10.5, weight: .medium))
+                .lineLimit(1)
         }
     }
 
     // MARK: - 底部操作
     private func footer(_ item: ClipItem) -> some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 6) {
+            HStack(spacing: 5) {
+                // 次要动作图标按钮组
+                HStack(spacing: 4) {
+                    Button(role: .destructive) {
+                        viewModel.previewItem = nil
+                        viewModel.delete(item: item)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .clipMateIconButton(size: 26, tint: .red)
+                    .help(L10n.tr("preview.tip_delete"))
+
+                    if item.kind != .image {
+                        Button {
+                            viewModel.previewItem = nil
+                            viewModel.beginEdit(item: item)
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .clipMateIconButton(size: 26)
+                        .help(L10n.tr("preview.tip_edit"))
+                    }
+
+                    Button {
+                        viewModel.openEditSnippet(item: item)
+                    } label: {
+                        Image(systemName: item.isSnippet ? "bookmark.fill" : "bookmark")
+                    }
+                    .clipMateIconButton(size: 26, tint: item.isSnippet ? Palette.snippet : nil)
+                    .help(item.isSnippet ? L10n.tr("preview.tip_snippet_edit") : L10n.tr("preview.tip_snippet_save"))
+
+                    Button {
+                        _ = viewModel.toggleQueue(item: item)
+                        HapticHelper.alignment()
+                    } label: {
+                        Image(systemName: "list.number")
+                    }
+                    .clipMateIconButton(size: 26, tint: viewModel.queue.contains { $0.id == item.id } ? Color.accentColor : nil)
+                    .help(viewModel.queue.contains { $0.id == item.id } ? L10n.tr("preview.tip_queue_remove") : L10n.tr("preview.tip_queue_add"))
+                }
+
+                Spacer(minLength: 4)
+
+                // 主要操作：复制 / 粘贴
+                HStack(spacing: 6) {
+                    Button {
+                        viewModel.copy(item: item)
+                        viewModel.previewItem = nil
+                    } label: {
+                        Label(L10n.tr("action.copy"), systemImage: "doc.on.doc")
+                    }
+                    .clipMateGlass(size: .small)
+
+                    Button {
+                        viewModel.paste(item: item)
+                        viewModel.previewItem = nil
+                    } label: {
+                        Label(L10n.tr("action.paste"), systemImage: "arrow.right.doc.on.clipboard")
+                    }
+                    .clipMateAccent(size: .small)
+                }
+            }
+
+            // 快捷键提示条
             HStack(spacing: 4) {
-                Text("⏎")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.08)))
-                Text("粘贴")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text("⌘⏎")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.08)))
-                Text("复制")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
+                Text(L10n.tr("preview.shortcut_bar"))
+                Spacer()
             }
-
-            Spacer()
-
-            Button(role: .destructive) {
-                viewModel.previewItem = nil
-                viewModel.delete(item: item)
-            } label: {
-                Label("删除", systemImage: "trash")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            if item.kind != .image {
-                Button {
-                    viewModel.previewItem = nil
-                    viewModel.beginEdit(item: item)
-                } label: {
-                    Label("编辑…", systemImage: "pencil")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            if item.isSnippet {
-                Button {
-                    viewModel.openEditSnippet(item: item)
-                } label: {
-                    Label("片段设置", systemImage: "bookmark")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            } else {
-                Button {
-                    viewModel.openEditSnippet(item: item)
-                } label: {
-                    Label("存为片段", systemImage: "bookmark.fill")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            Button {
-                _ = viewModel.toggleQueue(item: item)
-                HapticHelper.alignment()
-            } label: {
-                Label(viewModel.queue.contains { $0.id == item.id } ? "移出队列" : "加入队列",
-                      systemImage: "list.number")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button {
-                viewModel.copy(item: item)
-                viewModel.previewItem = nil
-            } label: {
-                Label("复制", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button {
-                viewModel.paste(item: item)
-                viewModel.previewItem = nil
-            } label: {
-                Label("粘贴", systemImage: "arrow.right.doc.on.clipboard")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            .font(.system(size: 9.5))
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 2)
         }
     }
 

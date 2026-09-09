@@ -9,10 +9,27 @@ public final class ClipStore {
     private let decoder = JSONDecoder()
 
     /// 语义检索的向量生成器（文本 → 向量二进制）；nil 表示未启用。
-    private let embeddingProvider: ((String) -> Data?)?
+    /// 由 `providerLock` 保护，支持运行中开关语义检索。
+    private var _embeddingProvider: ((String) -> Data?)?
+    private let providerLock = NSLock()
     /// 向量缓存：id → float 数组（懒加载，写操作后失效）。
     private let cacheLock = NSLock()
     private var embeddingCache: [Int64: [Float]]?
+
+    /// 当前向量生成器（线程安全读取）。
+    public var embeddingProvider: ((String) -> Data?)? {
+        providerLock.lock()
+        defer { providerLock.unlock() }
+        return _embeddingProvider
+    }
+
+    /// 运行中切换语义检索：替换生成器并失效向量缓存。
+    public func setEmbeddingProvider(_ provider: ((String) -> Data?)?) {
+        providerLock.lock()
+        _embeddingProvider = provider
+        providerLock.unlock()
+        resetEmbeddingCache()
+    }
 
     public func invalidateEmbeddingCache() {
         resetEmbeddingCache()
@@ -29,7 +46,7 @@ public final class ClipStore {
                 embeddingProvider: ((String) -> Data?)? = nil) throws {
         self.db = database
         self.blobs = blobStore
-        self.embeddingProvider = embeddingProvider
+        self._embeddingProvider = embeddingProvider
         try Migrations.run(database)
     }
 
@@ -134,7 +151,7 @@ public final class ClipStore {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             let textResults = try textSearch(trimmed, filter: filter, snippetGroup: snippetGroup, limit: limit)
-            guard !trimmed.isEmpty, let provider = embeddingProvider else { return textResults }
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("/"), let provider = embeddingProvider else { return textResults }
 
             let vectors = embeddingVectors()
             guard !vectors.isEmpty else { return textResults }
@@ -181,6 +198,80 @@ public final class ClipStore {
     }
 
     private func textSearch(_ trimmed: String, filter: FilterKind, snippetGroup: String? = nil, limit: Int) throws -> [ClipItem] {
+        // 短语代码快速匹配与文本扩展（/xxx 或直接 /）
+        if trimmed.hasPrefix("/") {
+            let rawCode = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+            let code = rawCode.hasPrefix("/") ? String(rawCode.dropFirst()) : rawCode
+            var clauses: [String] = []
+            var args: [SQLValue] = []
+
+            if code.isEmpty {
+                // 用户只输入了 "/"，直接召回所有片段，优先展示含短语代码的条目
+                clauses.append("(tags LIKE ? OR meta LIKE ?)")
+                args.append(.text("%\"" + FilterKind.snippetTag + "\"%"))
+                args.append(.text("%\"snippet\":%"))
+            } else {
+                clauses.append("(meta LIKE ? OR meta LIKE ? OR plain_text LIKE ? OR title LIKE ?)")
+                args.append(.text("%\"snippet_shortcode\":\"%" + code + "%\"%"))
+                args.append(.text("%\"snippet_shortcode\":\"/%" + code + "%\"%"))
+                args.append(.text("%" + code + "%"))
+                args.append(.text("%" + code + "%"))
+            }
+
+            if let clause = filter.kindClause { clauses.append(clause) }
+            if let extra = filter.extraClause { clauses.append(extra) }
+            if filter == .pinned { clauses.append("pinned = 1") }
+            if filter == .snippet, let group = snippetGroup, !group.isEmpty {
+                clauses.append("meta LIKE ?")
+                args.append(.text("%\"snippet_group\":\"\(group)\"%"))
+            }
+
+            var sql = "SELECT \(Self.listColumns) FROM clip"
+            if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
+
+            if code.isEmpty {
+                sql += """
+                 ORDER BY
+                  CASE
+                    WHEN meta LIKE '%"snippet_shortcode"%' THEN 0
+                    ELSE 1
+                  END,
+                  pinned DESC,
+                  last_used_at DESC
+                 LIMIT ?
+                """
+                args.append(.int(Int64(limit)))
+            } else {
+                let exact1 = "%\"snippet_shortcode\":\"" + code + "\"%"
+                let exact2 = "%\"snippet_shortcode\":\"/" + code + "\"%"
+                let prefix1 = "%\"snippet_shortcode\":\"" + code + "%\"%"
+                let prefix2 = "%\"snippet_shortcode\":\"/" + code + "%\"%"
+                let snippetTagPattern = "%\"" + FilterKind.snippetTag + "\"%"
+                sql += """
+                 ORDER BY
+                  CASE
+                    WHEN (meta LIKE ? OR meta LIKE ?) THEN 0
+                    WHEN (meta LIKE ? OR meta LIKE ?) THEN 1
+                    WHEN (tags LIKE ? OR meta LIKE '%"snippet":%') THEN 2
+                    ELSE 3
+                  END,
+                  pinned DESC,
+                  last_used_at DESC
+                 LIMIT ?
+                """
+                args.append(.text(exact1))
+                args.append(.text(exact2))
+                args.append(.text(prefix1))
+                args.append(.text(prefix2))
+                args.append(.text(snippetTagPattern))
+                args.append(.int(Int64(limit)))
+            }
+
+            let statement = try db.prepare(sql)
+            statement.bind(args)
+            return collect(statement)
+        }
+
         if !trimmed.isEmpty, db.hasFTS5, !containsCJK(trimmed) {
             let ftsQuery = ftsExpression(for: trimmed)
             var sql = "SELECT \(Self.ftsListColumns) FROM clip, clip_fts WHERE clip_fts MATCH ? AND clip.id = clip_fts.rowid"
@@ -202,9 +293,10 @@ public final class ClipStore {
         var clauses: [String] = []
         var args: [SQLValue] = []
         if !trimmed.isEmpty {
-            clauses.append("(plain_text LIKE ? OR title LIKE ?)")
+            clauses.append("(plain_text LIKE ? OR title LIKE ? OR meta LIKE ?)")
             args.append(.text("%\(trimmed)%"))
             args.append(.text("%\(trimmed)%"))
+            args.append(.text("%\"snippet_shortcode\":\"%\(trimmed)%\"%"))
         }
         if let clause = filter.kindClause { clauses.append(clause) }
         if let extra = filter.extraClause { clauses.append(extra) }
@@ -423,8 +515,13 @@ public final class ClipStore {
         if let g = trimmedGroup, !g.isEmpty {
             meta["snippet_group"] = g
         }
-        if let s = trimmedShortcode, !s.isEmpty {
-            meta["snippet_shortcode"] = s
+        let cleanShortcode: String? = {
+            guard let s = trimmedShortcode, !s.isEmpty else { return nil }
+            let stripped = s.hasPrefix("/") ? String(s.dropFirst()) : s
+            return stripped.isEmpty ? nil : stripped
+        }()
+        if let cleanShortcode {
+            meta["snippet_shortcode"] = cleanShortcode
         }
 
         let now = Date()
@@ -447,7 +544,7 @@ public final class ClipStore {
             var updatedMeta = existing.meta
             updatedMeta["snippet"] = "1"
             if let g = trimmedGroup, !g.isEmpty { updatedMeta["snippet_group"] = g }
-            if let s = trimmedShortcode, !s.isEmpty { updatedMeta["snippet_shortcode"] = s }
+            if let cleanShortcode { updatedMeta["snippet_shortcode"] = cleanShortcode }
 
             let statement = try db.prepare("""
                 UPDATE clip SET title = ?, tags = ?, meta = ?, last_used_at = ? WHERE id = ?
@@ -514,10 +611,11 @@ public final class ClipStore {
 
         if let shortcode {
             let trimmedCode = shortcode.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmedCode.isEmpty {
+            let stripped = trimmedCode.hasPrefix("/") ? String(trimmedCode.dropFirst()) : trimmedCode
+            if stripped.isEmpty {
                 meta.removeValue(forKey: "snippet_shortcode")
             } else {
-                meta["snippet_shortcode"] = trimmedCode
+                meta["snippet_shortcode"] = stripped
             }
         }
 

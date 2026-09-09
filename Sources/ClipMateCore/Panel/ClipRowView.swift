@@ -27,19 +27,36 @@ extension ClipKind {
 
 /// 历史列表行：类型图标/缩略图 + 内容预览 + 来源应用 + 时间 + 标签。
 /// 悬停高亮用行内 @State：只有该行重算，避免鼠标划过时整列表刷新。
-struct ClipRowView: View, Equatable {
-    let item: ClipItem
-    let selected: Bool
-    var multiSelected: Bool = false
-    let thumbnail: NSImage?
-    var searchHighlight: String = ""
+public struct ClipRowView: View, Equatable {
+    public let item: ClipItem
+    public let selected: Bool
+    public var multiSelected: Bool = false
+    public let thumbnail: NSImage?
+    public var searchHighlight: String = ""
+    public var language: AppLanguage = .system
+    public var theme: AppTheme = .default
     @State private var hovered = false
 
-    static func == (lhs: ClipRowView, rhs: ClipRowView) -> Bool {
+    public init(item: ClipItem, selected: Bool, multiSelected: Bool = false,
+                thumbnail: NSImage? = nil, searchHighlight: String = "",
+                language: AppLanguage = .system,
+                theme: AppTheme = .default) {
+        self.item = item
+        self.selected = selected
+        self.multiSelected = multiSelected
+        self.thumbnail = thumbnail
+        self.searchHighlight = searchHighlight
+        self.language = language
+        self.theme = theme
+    }
+
+    public static func == (lhs: ClipRowView, rhs: ClipRowView) -> Bool {
         lhs.item.id == rhs.item.id &&
         lhs.selected == rhs.selected &&
         lhs.multiSelected == rhs.multiSelected &&
         lhs.searchHighlight == rhs.searchHighlight &&
+        lhs.language == rhs.language &&
+        lhs.theme == rhs.theme &&
         lhs.item.pinned == rhs.item.pinned &&
         lhs.item.useCount == rhs.item.useCount &&
         lhs.item.tags == rhs.item.tags &&
@@ -49,7 +66,7 @@ struct ClipRowView: View, Equatable {
         lhs.thumbnail === rhs.thumbnail
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 10) {
             leading
             VStack(alignment: .leading, spacing: 2) {
@@ -104,7 +121,7 @@ struct ClipRowView: View, Equatable {
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     }
-                    Text(TimeHelper.relative(item.createdAt))
+                    Text(L10n.relativeTime(item.createdAt, lang: language))
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                     if let group = item.snippetGroup, !group.isEmpty {
@@ -112,8 +129,8 @@ struct ClipRowView: View, Equatable {
                             .font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.purple.opacity(0.15)))
-                            .foregroundStyle(Color.purple)
+                            .background(Capsule().fill(Palette.snippet.opacity(0.14)))
+                            .foregroundStyle(Palette.snippet)
                     }
                     if let shortcode = item.snippetShortcode, !shortcode.isEmpty {
                         Text("⚡️ \(shortcode)")
@@ -124,7 +141,7 @@ struct ClipRowView: View, Equatable {
                             .foregroundStyle(Color.orange)
                     }
                     ForEach(item.tags.filter { $0 != FilterKind.snippetTag && $0 != item.snippetGroup }.prefix(2), id: \.self) { tag in
-                        Text(tag)
+                        Text(L10n.tagTitle(tag, lang: language))
                             .font(.system(size: 9))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -137,12 +154,12 @@ struct ClipRowView: View, Equatable {
             if multiSelected && !selected {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(theme.accent)
             }
             if item.pinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(Palette.pin)
+                    .foregroundStyle(theme.pinColor)
             }
             Text("×\(item.useCount)")
                 .font(.system(size: 9, design: .monospaced))
@@ -158,7 +175,7 @@ struct ClipRowView: View, Equatable {
         .overlay(alignment: .leading) {
             if selected {
                 RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.accentColor)
+                    .fill(theme.accent)
                     .frame(width: 3, height: 22)
                     .padding(.leading, 3)
             }
@@ -168,9 +185,9 @@ struct ClipRowView: View, Equatable {
     }
 
     private var rowBackground: Color {
-        if selected { return Color.accentColor.opacity(0.16) }
-        if multiSelected { return Color.accentColor.opacity(0.08) }
-        if hovered { return Color.primary.opacity(0.05) }
+        if selected { return theme.selectionBackground }
+        if multiSelected { return theme.selectionBackground.opacity(0.5) }
+        if hovered { return theme.hoverBackground }
         return .clear
     }
 
@@ -205,7 +222,7 @@ struct ClipRowView: View, Equatable {
         } else if item.isSnippet {
             Image(systemName: "bookmark.fill")
                 .font(.system(size: 15))
-                .foregroundStyle(Color.purple)
+                .foregroundStyle(Palette.snippet)
                 .frame(width: 22)
         } else {
             Image(systemName: item.kind.systemImage)

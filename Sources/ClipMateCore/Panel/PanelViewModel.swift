@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 /// 主面板状态与动作。所有公开方法约定在主线程调用（SwiftUI/键盘监听/采集回调均在主线程）。
 public final class PanelViewModel: ObservableObject {
@@ -44,9 +45,6 @@ public final class PanelViewModel: ObservableObject {
     /// 批量多选（⇧↑↓ 扩展，存条目 id 以免列表刷新错位）。
     @Published public var multiSelectedIDs: Set<Int64> = []
 
-    /// AI 工作台独立窗口（⌘K），由 AppModel 装配注入。
-    weak var aiWorkspace: AIWorkspaceController?
-
     public let store: ClipStore
     public let settings: AppSettings
     public let ai: AIService
@@ -60,6 +58,7 @@ public final class PanelViewModel: ObservableObject {
 
     private var searchTask: Task<Void, Never>?
     private let thumbCache = NSCache<NSNumber, NSImage>()
+    private var cancellables = Set<AnyCancellable>()
 
     public init(store: ClipStore, settings: AppSettings, monitor: ClipboardMonitor,
                 frontApps: FrontAppTracker, ai: AIService) {
@@ -71,6 +70,20 @@ public final class PanelViewModel: ObservableObject {
         self.aiModel = AIWorkspaceModel(ai: ai, store: store, monitor: monitor, settings: settings)
         self.aiModel.pasteTargetProvider = { [weak self] in self?.pasteTarget }
         self.aiModel.hidePanel = { [weak self] in self?.dismiss?() }
+
+        settings.$appLanguage
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        settings.$appTheme
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - 数据
