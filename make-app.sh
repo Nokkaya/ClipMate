@@ -28,6 +28,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>     <string>13.0</string>
     <key>LSUIElement</key>                <true/>
     <key>NSHighResolutionCapable</key>    <true/>
+    <key>SUFeedURL</key>                  <string>https://raw.githubusercontent.com/zhangdi/ClipMate/main/appcast.xml</string>
+    <key>SUEnableAutomaticChecks</key>    <true/>
 </dict>
 </plist>
 PLIST

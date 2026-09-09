@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>ClipMate Changelog</title>
+    <link>https://raw.githubusercontent.com/zhangdi/ClipMate/main/appcast.xml</link>
+    <description>Most recent changes with links to updates.</description>
+    <language>en</language>
+    <item>
+      <title>Version 0.2.0</title>
+      <pubDate>Tue, 08 Sep 2026 17:27:17 +0800</pubDate>
+      <sparkle:releaseNotesLink>https://github.com/zhangdi/ClipMate/releases/tag/v0.2.0</sparkle:releaseNotesLink>
+      <description><![CDATA[
+        <h2>ClipMate v0.2.0</h2>
+        <ul>
+          <li>内置 AI 智能问答侧边栏，支持与主历史无缝联动。</li>
+          <li>Liquid Glass 液态毛玻璃按钮与现代微光设计。</li>
+          <li>中英文双语全界面即时无缝切换。</li>
+          <li>正式发布 DMG 安装镜像与自动更新支持。</li>
+        </ul>
+      ]]></description>
+      <enclosure url="https://github.com/zhangdi/ClipMate/releases/download/v0.2.0/ClipMate-0.2.0.dmg"
+                 sparkle:version="2"
+                 sparkle:shortVersionString="0.2.0"
+                 length="3184717"
+                 type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>
