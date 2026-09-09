@@ -28,6 +28,16 @@ public final class PanelViewModel: ObservableObject {
     /// 侧边栏展开/收起回调（驱动窗口平滑改变宽度）
     public var onAISidebarToggled: ((Bool) -> Void)?
 
+    // 情境过滤：来源应用 + 时间范围
+    @Published public var timeFilter: TimeFilter = .all
+    @Published public var sourceFilter: String?
+    @Published public var availableSources: [ClipSource] = []
+
+    // 手动重命名（用户自定义标题）
+    @Published public var showRenameOverlay = false
+    @Published public var renameTargetID: Int64?
+    @Published public var renameDraft = ""
+
     // 片段专用管理状态
     @Published public var showSnippetOverlay = false
     @Published public var snippetTargetID: Int64? = nil
@@ -88,23 +98,30 @@ public final class PanelViewModel: ObservableObject {
 
     // MARK: - 数据
 
+    /// 当前情境过滤（来源应用 + 时间范围）。
+    public var contextFilter: ContextFilter {
+        ContextFilter(time: timeFilter, sourceBundle: sourceFilter)
+    }
+
     public func reload(resetSelection: Bool = false) {
         let q = query
         let f = filter
         let sg = snippetGroup
+        let ctx = contextFilter
         if q.isEmpty {
             searchTask?.cancel()
             searchTask = nil
-            let results = store.search(query: q, filter: f, snippetGroup: sg, limit: 300)
+            let results = store.search(query: q, filter: f, snippetGroup: sg, context: ctx, limit: 300)
             applySearchResults(results, resetSelection: resetSelection)
         } else {
             searchTask?.cancel()
             let store = self.store
             searchTask = Task.detached(priority: .userInitiated) { [weak self] in
-                let results = store.search(query: q, filter: f, snippetGroup: sg, limit: 300)
+                let results = store.search(query: q, filter: f, snippetGroup: sg, context: ctx, limit: 300)
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
-                    guard let self, self.query == q, self.filter == f, self.snippetGroup == sg else { return }
+                    guard let self, self.query == q, self.filter == f, self.snippetGroup == sg,
+                          self.contextFilter == ctx else { return }
                     self.applySearchResults(results, resetSelection: resetSelection)
                 }
             }
@@ -112,6 +129,7 @@ public final class PanelViewModel: ObservableObject {
         if filter == .snippet {
             refreshSnippetGroups()
         }
+        refreshSources()
     }
 
     /// 用户在搜索框键入内容时，防抖 100ms 触发异步检索
@@ -120,6 +138,7 @@ public final class PanelViewModel: ObservableObject {
         let q = query
         let f = filter
         let sg = snippetGroup
+        let ctx = contextFilter
         if q.isEmpty {
             reload(resetSelection: true)
             return
@@ -128,13 +147,51 @@ public final class PanelViewModel: ObservableObject {
         searchTask = Task.detached(priority: .userInitiated) { [weak self] in
             try? await Task.sleep(nanoseconds: 100_000_000)
             guard !Task.isCancelled else { return }
-            let results = store.search(query: q, filter: f, snippetGroup: sg, limit: 300)
+            let results = store.search(query: q, filter: f, snippetGroup: sg, context: ctx, limit: 300)
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
-                guard let self, self.query == q, self.filter == f, self.snippetGroup == sg else { return }
+                guard let self, self.query == q, self.filter == f, self.snippetGroup == sg,
+                      self.contextFilter == ctx else { return }
                 self.applySearchResults(results, resetSelection: true)
             }
         }
+    }
+
+    // MARK: - 情境过滤（来源应用 + 时间范围）
+
+    public func refreshSources() {
+        availableSources = store.distinctSources()
+    }
+
+    public func setTimeFilter(_ time: TimeFilter) {
+        guard timeFilter != time else { return }
+        timeFilter = time
+        clearMultiSelection()
+        reload(resetSelection: true)
+        HapticHelper.alignment()
+    }
+
+    public func setSourceFilter(_ bundle: String?) {
+        guard sourceFilter != bundle else { return }
+        sourceFilter = bundle
+        clearMultiSelection()
+        reload(resetSelection: true)
+        HapticHelper.alignment()
+    }
+
+    public func clearContextFilter() {
+        guard timeFilter != .all || sourceFilter != nil else { return }
+        timeFilter = .all
+        sourceFilter = nil
+        clearMultiSelection()
+        reload(resetSelection: true)
+        HapticHelper.alignment()
+    }
+
+    /// 来源筛选的展示名。
+    public var sourceFilterName: String? {
+        guard let bundle = sourceFilter else { return nil }
+        return availableSources.first { $0.bundle == bundle }?.name ?? bundle
     }
 
     private func applySearchResults(_ newItems: [ClipItem], resetSelection: Bool = false) {
@@ -306,6 +363,53 @@ public final class PanelViewModel: ObservableObject {
         showEditOverlay = false
         reload()
         copy(item: store.item(id: target.id) ?? target)
+    }
+
+    /// 当前重命名目标条目。
+    public var renameTarget: ClipItem? {
+        guard let id = renameTargetID else { return nil }
+        return items.first { $0.id == id } ?? store.item(id: id)
+    }
+
+    /// 打开重命名浮层：预填当前标题。
+    public func beginRename(item: ClipItem? = nil) {
+        let target = item ?? selectedItem
+        guard let target else { return }
+        renameTargetID = target.id
+        renameDraft = target.title ?? ""
+        showRenameOverlay = true
+    }
+
+    /// 保存自定义标题（写入 title 列，可被检索命中）。
+    public func saveRename() {
+        guard let id = renameTargetID else { return }
+        try? store.setUserTitle(id, title: renameDraft)
+        closeRenameOverlay()
+        reload()
+        HapticHelper.feedback()
+    }
+
+    /// 直接清除自定义标题（右键菜单入口）。
+    public func clearTitle(item: ClipItem? = nil) {
+        guard let target = item ?? selectedItem else { return }
+        try? store.setUserTitle(target.id, title: nil)
+        reload()
+        HapticHelper.feedback()
+    }
+
+    /// 清除自定义标题，恢复自动标题。
+    public func clearRename() {
+        guard let id = renameTargetID else { return }
+        try? store.setUserTitle(id, title: nil)
+        closeRenameOverlay()
+        reload()
+        HapticHelper.feedback()
+    }
+
+    private func closeRenameOverlay() {
+        showRenameOverlay = false
+        renameTargetID = nil
+        renameDraft = ""
     }
 
     public func requestClearAll() {
@@ -496,6 +600,7 @@ public final class PanelViewModel: ObservableObject {
     public func clearTransientState() {
         showEditOverlay = false
         showSnippetOverlay = false
+        closeRenameOverlay()
         showConfirmClear = false
         previewItem = nil
     }

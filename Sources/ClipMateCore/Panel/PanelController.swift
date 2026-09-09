@@ -247,6 +247,11 @@ final class PanelController {
             if event.keyCode == 53 { viewModel.showEditOverlay = false; return true }
             return false
         }
+        // 重命名浮层：除 Esc 外放行给输入框
+        if viewModel.showRenameOverlay {
+            if event.keyCode == 53 { viewModel.showRenameOverlay = false; return true }
+            return false
+        }
         // 片段编辑浮层：除 Esc 外放行给表单控件
         if viewModel.showSnippetOverlay {
             if event.keyCode == 53 { viewModel.showSnippetOverlay = false; return true }
@@ -350,6 +355,9 @@ final class PanelController {
             return true
         case 34 where cmdOnly: // ⌘I 详情预览
             viewModel.togglePreview()
+            return true
+        case 15 where cmdOnly: // ⌘R 重命名
+            viewModel.beginRename()
             return true
         case 40 where cmdOnly: // ⌘K 切换 AI 侧边栏
             viewModel.toggleAISidebar()

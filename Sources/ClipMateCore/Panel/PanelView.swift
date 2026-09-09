@@ -21,6 +21,7 @@ struct PanelView: View {
                 VStack(spacing: 0) {
                     SearchBar(viewModel: viewModel)
                     FilterChips(viewModel: viewModel)
+                    ContextFilterBar(viewModel: viewModel)
                     // 片段分类下展示分组栏（全部 / 各分组 / 新建片段）
                     if viewModel.filter == .snippet {
                         SnippetGroupBar(viewModel: viewModel)
@@ -47,7 +48,7 @@ struct PanelView: View {
                     .opacity(viewModel.isAISidebarOpen ? 1 : 0)
             }
             .frame(width: 880, alignment: .leading)
-            .disabled(viewModel.showEditOverlay || viewModel.showSnippetOverlay || viewModel.showConfirmClear || viewModel.previewItem != nil)
+            .disabled(viewModel.showEditOverlay || viewModel.showSnippetOverlay || viewModel.showRenameOverlay || viewModel.showConfirmClear || viewModel.previewItem != nil)
 
             if viewModel.showEditOverlay {
                 EditOverlay(viewModel: viewModel)
@@ -55,6 +56,10 @@ struct PanelView: View {
             }
             if viewModel.showSnippetOverlay {
                 SnippetEditOverlay(viewModel: viewModel)
+                    .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
+            }
+            if viewModel.showRenameOverlay {
+                RenameOverlay(viewModel: viewModel)
                     .frame(width: viewModel.isAISidebarOpen ? 880 : 440, height: 520)
             }
             if viewModel.showConfirmClear {
@@ -100,6 +105,7 @@ struct SearchBar: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($focused)
+                .help(L10n.tr("search.syntax_hint", lang: viewModel.settings.appLanguage))
 
             if !viewModel.query.isEmpty {
                 Button {
@@ -161,13 +167,107 @@ struct FilterChips: View {
     }
 
     var body: some View {
-        HStack(spacing: 4) {
+        // 固定 4 列网格：分类增至 8 个后仍能全部可见可点（横向滚动在面板里不可用）
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4),
+            spacing: 4
+        ) {
             ForEach(FilterKind.allCases) { kind in
                 FilterChip(kind: kind, selected: viewModel.filter == kind, lang: settings.appLanguage) {
                     viewModel.changeFilter(kind)
                 }
             }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - 情境过滤（来源应用 + 时间范围）
+
+/// 把"我记得是昨天从微信复制的"变成可点选的条件。
+struct ContextFilterBar: View {
+    @ObservedObject var viewModel: PanelViewModel
+    @ObservedObject var settings: AppSettings
+
+    init(viewModel: PanelViewModel) {
+        self.viewModel = viewModel
+        self.settings = viewModel.settings
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Menu {
+                ForEach(TimeFilter.allCases) { time in
+                    Button {
+                        viewModel.setTimeFilter(time)
+                    } label: {
+                        if viewModel.timeFilter == time {
+                            Label(L10n.timeTitle(time, lang: settings.appLanguage), systemImage: "checkmark")
+                        } else {
+                            Text(L10n.timeTitle(time, lang: settings.appLanguage))
+                        }
+                    }
+                }
+            } label: {
+                menuLabel(
+                    icon: "clock",
+                    text: L10n.timeTitle(viewModel.timeFilter, lang: settings.appLanguage),
+                    active: viewModel.timeFilter != .all
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+
+            Menu {
+                Button {
+                    viewModel.setSourceFilter(nil)
+                } label: {
+                    if viewModel.sourceFilter == nil {
+                        Label(L10n.tr("filter.all_sources", lang: settings.appLanguage), systemImage: "checkmark")
+                    } else {
+                        Text(L10n.tr("filter.all_sources", lang: settings.appLanguage))
+                    }
+                }
+                if !viewModel.availableSources.isEmpty {
+                    Divider()
+                    ForEach(viewModel.availableSources) { source in
+                        Button {
+                            viewModel.setSourceFilter(source.bundle)
+                        } label: {
+                            if viewModel.sourceFilter == source.bundle {
+                                Label("\(source.name) (\(source.count))", systemImage: "checkmark")
+                            } else {
+                                Text("\(source.name) (\(source.count))")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                menuLabel(
+                    icon: "app.badge",
+                    text: viewModel.sourceFilterName ?? L10n.tr("filter.all_sources", lang: settings.appLanguage),
+                    active: viewModel.sourceFilter != nil
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+
+            if viewModel.contextFilter.isActive {
+                Button {
+                    viewModel.clearContextFilter()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                }
+                .clipMateIconButton(size: 18)
+                .help(L10n.tr("filter.clear_context", lang: settings.appLanguage))
+            }
+
             Spacer()
+
             if settings.pauseCapture {
                 HStack(spacing: 3) {
                     Circle().fill(Color.orange).frame(width: 6, height: 6)
@@ -179,7 +279,24 @@ struct FilterChips: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.vertical, 3)
+    }
+
+    private func menuLabel(icon: String, text: String, active: Bool) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 9.5))
+            Text(text)
+                .font(.system(size: 10.5, weight: active ? .medium : .regular))
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 7, weight: .bold))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(active ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.05)))
+        .foregroundStyle(active ? Color.accentColor : Color.secondary)
+        .contentShape(Capsule())
     }
 }
 
@@ -196,15 +313,19 @@ private struct FilterChip: View {
                     .font(.system(size: 10))
                 Text(L10n.filterTitle(kind, lang: lang))
                     .font(.system(size: 11, weight: selected ? .medium : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .padding(.vertical, 3.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                Capsule()
-                    .fill(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.04))
             )
             .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-            .contentShape(Capsule())
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -343,6 +464,10 @@ struct ContextMenuItems: View {
         }
         if item.kind != .image {
             Button(L10n.tr("action.edit_item")) { viewModel.beginEdit(item: item) }
+        }
+        Button(L10n.tr("action.rename")) { viewModel.beginRename(item: item) }
+        if item.isUserTitled {
+            Button(L10n.tr("action.clear_title")) { viewModel.clearTitle(item: item) }
         }
         Button(L10n.tr("action.preview")) { viewModel.togglePreview(item: item) }
         Button(viewModel.queue.contains { $0.id == item.id } ? L10n.tr("action.queue_remove") : L10n.tr("action.queue_add")) {

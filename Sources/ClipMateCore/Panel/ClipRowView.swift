@@ -88,7 +88,13 @@ public struct ClipRowView: View, Equatable {
                         return item.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
                     }()
                     if !subtitleText.isEmpty && subtitleText != title {
-                        if !searchHighlight.isEmpty {
+                        if let numberText = NumberRecognizer.displayText(subtitleText) {
+                            // 号码按人类习惯分组 + 等宽，扫视识别更快
+                            Text(numberText)
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .lineLimit(1)
+                                .foregroundStyle(.secondary)
+                        } else if !searchHighlight.isEmpty {
                             Text(TextHighlighter.highlight(text: subtitleText, query: searchHighlight))
                                 .font(.system(size: 10.5))
                                 .lineLimit(1)
@@ -100,6 +106,13 @@ public struct ClipRowView: View, Equatable {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                } else if let numberText = NumberRecognizer.displayText(item.displayText) {
+                    // 号码类内容：分组展示（138 1234 5678）并放大字号
+                    Text(numberText)
+                        .font(.system(size: 13.5, weight: .medium, design: .monospaced))
+                        .lineLimit(2)
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
                 } else {
                     if !searchHighlight.isEmpty {
                         Text(TextHighlighter.highlight(text: item.displayText, query: searchHighlight))

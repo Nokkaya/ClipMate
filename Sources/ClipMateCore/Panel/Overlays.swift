@@ -116,6 +116,78 @@ struct EditOverlay: View {
     }
 }
 
+/// 重命名浮层：给条目设置用户自定义标题，之后可按该名称检索。
+struct RenameOverlay: View {
+    @ObservedObject var viewModel: PanelViewModel
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        overlayContainer {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "tag.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 26, height: 26)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.accentColor.opacity(0.15)))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(L10n.tr("overlay.rename.title"))
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(L10n.tr("overlay.rename.subtitle"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        viewModel.showRenameOverlay = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                    }
+                    .clipMateIconButton(size: 22)
+                    .keyboardShortcut(.cancelAction)
+                }
+
+                TextField(L10n.tr("overlay.rename.placeholder"), text: $viewModel.renameDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .focused($isFocused)
+                    .onSubmit { viewModel.saveRename() }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.05)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9)
+                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+
+                HStack {
+                    if viewModel.renameTarget?.isUserTitled == true {
+                        Button(L10n.tr("overlay.rename.clear")) { viewModel.clearRename() }
+                            .clipMateGlass(size: .regular)
+                    }
+                    Spacer()
+                    Button(L10n.tr("action.cancel")) {
+                        viewModel.showRenameOverlay = false
+                    }
+                    .clipMateGlass(size: .regular)
+                    .keyboardShortcut(.cancelAction)
+
+                    Button {
+                        viewModel.saveRename()
+                    } label: {
+                        Label(L10n.tr("action.save"), systemImage: "checkmark")
+                    }
+                    .clipMateAccent(size: .regular)
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .frame(maxWidth: 396)
+        }
+        .onAppear { isFocused = true }
+    }
+}
+
 /// 清空确认浮层（替代模态弹窗，保持面板内交互）。
 struct ConfirmClearOverlay: View {
     @ObservedObject var viewModel: PanelViewModel

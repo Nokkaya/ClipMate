@@ -509,7 +509,13 @@ struct PreviewOverlay: View {
             }
 
             ScrollView {
-                if !viewModel.query.isEmpty {
+                if let numberText = NumberRecognizer.displayText(item.plainText) {
+                    // 号码类内容：分组 + 放大等宽，便于逐位核对
+                    Text(numberText)
+                        .font(.system(size: 15, weight: .medium, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                } else if !viewModel.query.isEmpty {
                     Text(TextHighlighter.highlight(text: item.plainText, query: viewModel.query))
                         .font(.system(size: 12, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
