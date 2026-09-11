@@ -294,6 +294,24 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(lastUpdateCheckDate, forKey: "lastUpdateCheckDate") }
     }
 
+    /// 智能内容推荐开关
+    @Published public var enableSmartRecommendations: Bool {
+        didSet { defaults.set(enableSmartRecommendations, forKey: "enableSmartRecommendations") }
+    }
+    /// 推荐学习本地存储数据
+    @Published public var recommendationStore: RecommendationLearningStore {
+        didSet {
+            if let data = try? JSONEncoder().encode(recommendationStore) {
+                defaults.set(data, forKey: "recommendationStore")
+            }
+        }
+    }
+
+    public func clearRecommendationLearningData() {
+        recommendationStore.clear()
+        defaults.removeObject(forKey: "recommendationStore")
+    }
+
 
     /// API Key 只进 Keychain，不落 UserDefaults。
     public var aiAPIKey: String {
@@ -381,6 +399,14 @@ public final class AppSettings: ObservableObject {
             customPrompts = (try? JSONDecoder().decode([PromptTemplate].self, from: promptData)) ?? PromptTemplate.defaults
         } else {
             customPrompts = PromptTemplate.defaults
+        }
+
+        enableSmartRecommendations = defaults.object(forKey: "enableSmartRecommendations") as? Bool ?? true
+        if let recData = defaults.data(forKey: "recommendationStore"),
+           let store = try? JSONDecoder().decode(RecommendationLearningStore.self, from: recData) {
+            recommendationStore = store
+        } else {
+            recommendationStore = RecommendationLearningStore()
         }
     }
 

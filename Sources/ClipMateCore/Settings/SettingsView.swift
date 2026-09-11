@@ -869,6 +869,7 @@ private struct SnippetsTab: View {
 private struct CaptureTab: View {
     @ObservedObject var settings: AppSettings
     let store: ClipStore
+    @State private var showClearedAlert = false
 
     var body: some View {
         ScrollView {
@@ -936,8 +937,32 @@ private struct CaptureTab: View {
                     }
                 }
 
+                // 卡片 3: 智能情境推荐
+                SettingsCard(L10n.tr("settings.recommendations_title"), icon: "sparkles", iconColor: .purple) {
+                    VStack(spacing: 10) {
+                        SettingsRow(L10n.tr("settings.recommendations_title"), subtitle: L10n.tr("settings.recommendations_desc")) {
+                            Toggle("", isOn: $settings.enableSmartRecommendations)
+                                .toggleStyle(.switch)
+                        }
 
-                // 卡片 3: 检索引擎
+                        if settings.enableSmartRecommendations {
+                            Divider().overlay(Color.primary.opacity(0.04))
+
+                            SettingsRow(L10n.tr("settings.clear_rec_learning"), subtitle: nil) {
+                                Button(L10n.tr("action.reset")) {
+                                    settings.clearRecommendationLearningData()
+                                    showClearedAlert = true
+                                }
+                                .buttonStyle(.bordered)
+                                .alert(L10n.tr("settings.clear_rec_learning_done"), isPresented: $showClearedAlert) {
+                                    Button("OK", role: .cancel) { }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 卡片 4: 检索引擎
                 SettingsCard(L10n.tr("capture.card_db"), icon: "cylinder.split.1x2", iconColor: .green) {
                     HStack(spacing: 10) {
                         Image(systemName: store.supportsFullTextSearch ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")

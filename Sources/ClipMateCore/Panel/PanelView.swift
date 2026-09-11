@@ -26,6 +26,7 @@ struct PanelView: View {
                     if viewModel.filter == .snippet {
                         SnippetGroupBar(viewModel: viewModel)
                     }
+                    RecommendationBar(viewModel: viewModel)
                     Divider().overlay(Color.primary.opacity(0.08))
                     if viewModel.items.isEmpty {
                         EmptyStateView(query: viewModel.query)

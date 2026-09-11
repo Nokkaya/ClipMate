@@ -60,6 +60,9 @@ public final class PanelViewModel: ObservableObject {
     private var actionCache: [Int64: RecommendedAction?] = [:]
     private var actionTask: Task<Void, Never>?
 
+    /// 智能内容推荐（最多 3 条，独立推荐区展示，不影响普通历史顺序与数字快捷键）
+    @Published public var recommendations: [RecommendedItem] = []
+
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
@@ -135,6 +138,13 @@ public final class PanelViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        settings.$enableSmartRecommendations
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshRecommendations()
             }
             .store(in: &cancellables)
 
@@ -257,6 +267,7 @@ public final class PanelViewModel: ObservableObject {
         let visibleIDs = Set(items.map(\.id))
         multiSelectedIDs.formIntersection(visibleIDs)
         syncAITargetIfNeeded()
+        refreshRecommendations()
     }
 
     public func handleCaptured(_ item: ClipItem) {
@@ -366,6 +377,7 @@ public final class PanelViewModel: ObservableObject {
     }
 
     public func paste(item: ClipItem) {
+        recordUsage(item: item)
         pasteContent(store.pasteboardContent(for: item))
     }
 
@@ -421,6 +433,7 @@ public final class PanelViewModel: ObservableObject {
     }
 
     public func copy(item: ClipItem) {
+        recordUsage(item: item)
         guard let content = store.pasteboardContent(for: item) else { return }
         PasteBack.write(content)
         monitor.suppress(seconds: 1.5)
@@ -447,7 +460,11 @@ public final class PanelViewModel: ObservableObject {
         expandedFieldItemIDs.contains(itemID)
     }
 
-    public func pasteField(_ field: ExtractedField) {
+    public func pasteField(_ field: ExtractedField, for item: ClipItem? = nil) {
+        let target = item ?? selectedItem
+        if let target {
+            recordUsage(item: target, field: field)
+        }
         pasteFieldText(field.value)
     }
 
@@ -455,7 +472,11 @@ public final class PanelViewModel: ObservableObject {
         pasteContent(.text(text))
     }
 
-    public func copyField(_ field: ExtractedField) {
+    public func copyField(_ field: ExtractedField, for item: ClipItem? = nil) {
+        let target = item ?? selectedItem
+        if let target {
+            recordUsage(item: target, field: field)
+        }
         copyFieldText(field.value)
     }
 
@@ -519,6 +540,7 @@ public final class PanelViewModel: ObservableObject {
         let target = item ?? selectedItem
         guard let target else { return }
 
+        recordUsage(item: target, action: actionKind)
         cancelAction()
 
         switch actionKind {
@@ -649,6 +671,43 @@ public final class PanelViewModel: ObservableObject {
     public func copyActionResult() {
         guard let res = activeActionResult, !res.text.isEmpty else { return }
         copyFieldText(res.text)
+    }
+
+    // MARK: - 第四阶段：越用越顺手的内容推荐
+
+    public var overrideAppBundle: String? = nil
+    public var currentAppBundle: String? {
+        get { overrideAppBundle ?? pasteTarget?.bundleIdentifier }
+        set { overrideAppBundle = newValue }
+    }
+
+    public func refreshRecommendations() {
+        guard settings.enableSmartRecommendations else {
+            recommendations = []
+            return
+        }
+        recommendations = RecommendationEngine.computeRecommendations(
+            items: items,
+            currentAppBundle: currentAppBundle,
+            learningStore: settings.recommendationStore,
+            limit: 3,
+            appLanguage: settings.appLanguage
+        )
+    }
+
+    public func dismissRecommendation(id: Int64) {
+        settings.recommendationStore.ignoreItem(id: id)
+        recommendations.removeAll { $0.id == id }
+        HapticHelper.alignment()
+    }
+
+    public func recordUsage(item: ClipItem, field: ExtractedField? = nil, action: ContentActionKind? = nil) {
+        settings.recommendationStore.recordUsage(
+            itemID: item.id,
+            appBundle: currentAppBundle,
+            field: field,
+            action: action
+        )
     }
 
     public func togglePin(_ item: ClipItem? = nil) {
