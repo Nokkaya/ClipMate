@@ -1593,6 +1593,158 @@ runner.run("Phase 1 - 预热加载与即开即用（Prewarm & Instant Availabili
     runner.expectEqual(vm.items.first?.plainText, "历史预热条目", "预热数据正确")
 }
 
+runner.run("Phase 2 - 电话、邮箱和链接提取与定位（Phone, Email, URL Extraction）") {
+    let sample = "您好，技术支持请联系李工程师：+86 13800138000，或座机 010-88888888，技术支持邮箱 support@clipmate.ai，官方主页 https://clipmate.ai/portal"
+    let fields = ContentExtractor.extractFromText(sample)
+
+    let phones = fields.filter { $0.kind == .phone }.map(\.value)
+    runner.expectTrue(phones.contains(where: { $0.contains("13800138000") }), "成功提取手机号")
+    runner.expectTrue(phones.contains(where: { $0.contains("010-88888888") }), "成功提取座机号")
+
+    let emails = fields.filter { $0.kind == .email }.map(\.value)
+    runner.expectTrue(emails.contains("support@clipmate.ai"), "成功提取邮箱地址")
+
+    let urls = fields.filter { $0.kind == .url }.map(\.value)
+    runner.expectTrue(urls.contains("https://clipmate.ai/portal"), "成功提取网址链接")
+
+    for f in fields {
+        runner.expectTrue(f.sourceRange != nil, "字段 \(f.label) 具备原文位置 range")
+        if let r = f.sourceRange {
+            runner.expectEqual(String(sample[r]), f.value, "定位 range 在原文中与字段值精确一致")
+        }
+    }
+}
+
+runner.run("Phase 2 - 结构化联系人资料拆分（Contact Information Splitting）") {
+    let card = """
+    姓名：张三
+    公司：极客智能科技有限公司
+    职位：高级架构师
+    地址：北京市海淀区中关村南大街1号科技大厦A座801
+    电话：13911112222、0755-88886666
+    微信号：zhangsan_tech
+    """
+    let fields = ContentExtractor.extractFromText(card)
+
+    let nameField = fields.first { $0.label == "姓名" }
+    runner.expectEqual(nameField?.value, "张三", "正确拆分姓名")
+
+    let companyField = fields.first { $0.label == "公司" }
+    runner.expectEqual(companyField?.value, "极客智能科技有限公司", "正确拆分公司")
+
+    let titleField = fields.first { $0.label == "职位" }
+    runner.expectEqual(titleField?.value, "高级架构师", "正确拆分职位")
+
+    let addrField = fields.first { $0.label == "地址" }
+    runner.expectEqual(addrField?.value, "北京市海淀区中关村南大街1号科技大厦A座801", "保留完整详细地址全文")
+
+    let wechatField = fields.first { $0.label == "微信号" }
+    runner.expectEqual(wechatField?.value, "zhangsan_tech", "正确拆分微信号")
+
+    // 多号码独立拆出展示
+    let phoneValues = fields.filter { $0.kind == .phone }.map(\.value)
+    runner.expectTrue(phoneValues.contains("13911112222"), "拆出第一个电话号码")
+    runner.expectTrue(phoneValues.contains("0755-88886666"), "拆出第二个座机号码")
+
+    // 未提供的内容不补写
+    runner.expectTrue(fields.first { $0.label == "邮箱" } == nil, "未提及邮箱时不凭空补写字段")
+}
+
+runner.run("Phase 2 - JSON 字段高保真提取（JSON High-Fidelity Extraction）") {
+    let jsonText = """
+    {
+      "orderId": 987654321012345678,
+      "zipCode": "00852",
+      "userName": "Alice",
+      "active": true
+    }
+    """
+    let fields = ContentExtractor.extractFromText(jsonText)
+
+    let orderField = fields.first { $0.label == "orderId" }
+    runner.expectEqual(orderField?.value, "987654321012345678", "长数字不丢失精度、不转换为科学计数法")
+
+    let zipField = fields.first { $0.label == "zipCode" }
+    runner.expectEqual(zipField?.value, "00852", "字符串前导零完好保留")
+
+    let userField = fields.first { $0.label == "userName" }
+    runner.expectEqual(userField?.value, "Alice", "字符串值准确提取")
+
+    let activeField = fields.first { $0.label == "active" }
+    runner.expectEqual(activeField?.value, "true", "布尔值准确提取")
+}
+
+runner.run("Phase 2 - 图片 OCR 文字快捷取用（Image OCR Quick Access）") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let fakeImgData = Data([0x89, 0x50, 0x4E, 0x47])
+    let captured = try store.capture(
+        kind: .image,
+        plainText: "",
+        sourceBundle: "com.apple.Preview",
+        sourceName: "预览",
+        tags: ["图片"],
+        inlineData: fakeImgData,
+        imageOriginal: fakeImgData
+    )
+
+    // 模拟后台 OCR 识别完成
+    let ocrText = "发票号码：88889999\n联系电话：13812345678"
+    let updated = try store.updateOCR(captured.item.id, text: ocrText, title: "发票扫描件")!
+
+    let fields = ContentExtractor.extractFields(from: updated)
+    let ocrField = fields.first { $0.kind == .ocrText }
+    runner.expectTrue(ocrField != nil, "提供整段 OCR 识别文字快捷取用入口")
+    runner.expectEqual(ocrField?.value, ocrText, "OCR 全文一致")
+
+    // 从 OCR 结果中提取的子字段也可见
+    let phoneField = fields.first { $0.kind == .phone }
+    runner.expectTrue(phoneField != nil, "从图片 OCR 中提取出电话号码")
+    runner.expectTrue(phoneField?.value.contains("13812345678") == true, "提取出电话值")
+
+    // 原图原样粘贴不受影响
+    let pasteContent = store.pasteboardContent(for: updated)
+    if case .image? = pasteContent {
+        runner.expectTrue(true, "原条目依然按图片原样粘贴")
+    } else {
+        runner.expectTrue(false, "图片条目 pasteboardContent 应为 .image")
+    }
+}
+
+runner.run("Phase 2 - 字段快捷区交互（Field Shortcuts & Keyboard Actions）") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let text = "订单信息：订单号：10086，联系电话：13800138000，邮箱：order@test.com"
+    let item = try store.capture(kind: .text, plainText: text, sourceBundle: "com.test", sourceName: "Test", tags: []).item
+
+    let settings = AppSettings()
+    let monitor = ClipboardMonitor(settings: settings, store: store)
+    let front = FrontAppTracker()
+    let ai = AIService(settings: settings)
+    let vm = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: front, ai: ai)
+
+    vm.selectOnly(item: item)
+    let extracted = vm.fields(for: item)
+    runner.expectTrue(extracted.count >= 2, "提取出至少 2 个局部字段")
+
+    // 仅复制字段测试
+    vm.copyField(at: 0)
+    runner.expectEqual(NSPasteboard.general.string(forType: .string), extracted[0].value, "快捷仅复制成功写入首个字段")
+
+    // 键盘移动焦点测试
+    runner.expectEqual(vm.selectedFieldIndex, nil, "初始未聚焦任何字段")
+    vm.moveFieldSelection(1)
+    runner.expectEqual(vm.selectedFieldIndex, 0, "向右移动聚焦第 1 个字段")
+    vm.moveFieldSelection(1)
+    runner.expectEqual(vm.selectedFieldIndex, 1, "向右移动聚焦第 2 个字段")
+    vm.moveFieldSelection(-1)
+    runner.expectEqual(vm.selectedFieldIndex, 0, "向左移动返回第 1 个字段")
+    vm.moveFieldSelection(-1)
+    runner.expectEqual(vm.selectedFieldIndex, nil, "再次向左移动退出字段焦点")
+}
+
 print("----")
 
 

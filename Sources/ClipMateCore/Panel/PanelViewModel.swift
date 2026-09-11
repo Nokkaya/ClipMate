@@ -12,11 +12,17 @@ public final class PanelViewModel: ObservableObject {
             if items.indices.contains(selectedIndex) {
                 selectedID = items[selectedIndex].id
             }
+            selectedFieldIndex = nil
             syncAITargetIfNeeded()
         }
     }
     /// 选中锚点：以条目 id 记录，列表重排（新采集置顶等）后选中不漂移。
     @Published public var selectedID: Int64?
+    /// 选中的局部字段索引（键盘焦点）
+    @Published public var selectedFieldIndex: Int? = nil
+    /// 展开全部字段的条目 ID 集合
+    @Published public var expandedFieldItemIDs: Set<Int64> = []
+    private var fieldsCache: [Int64: [ExtractedField]] = [:]
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
@@ -218,12 +224,14 @@ public final class PanelViewModel: ObservableObject {
 
     public func handleCaptured(_ item: ClipItem) {
         thumbCache.removeObject(forKey: NSNumber(value: item.id))
+        fieldsCache.removeValue(forKey: item.id)
         reload()
     }
 
     /// 后台异步识别（OCR/智能标题/链接元数据等）完成后就地更新单条，不重排列表、不改变选中项与按钮位置
     public func handleItemUpdated(_ item: ClipItem) {
         thumbCache.removeObject(forKey: NSNumber(value: item.id))
+        fieldsCache.removeValue(forKey: item.id)
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index] = item
             if selectedID == item.id {
@@ -377,6 +385,81 @@ public final class PanelViewModel: ObservableObject {
         guard let content = store.pasteboardContent(for: item) else { return }
         PasteBack.write(content)
         monitor.suppress(seconds: 1.5)
+    }
+
+    // MARK: - 局部字段快捷取用
+
+    public func fields(for item: ClipItem) -> [ExtractedField] {
+        if let cached = fieldsCache[item.id] { return cached }
+        let extracted = ContentExtractor.extractFields(from: item)
+        fieldsCache[item.id] = extracted
+        return extracted
+    }
+
+    public func toggleExpandFields(for itemID: Int64) {
+        if expandedFieldItemIDs.contains(itemID) {
+            expandedFieldItemIDs.remove(itemID)
+        } else {
+            expandedFieldItemIDs.insert(itemID)
+        }
+    }
+
+    public func isFieldsExpanded(for itemID: Int64) -> Bool {
+        expandedFieldItemIDs.contains(itemID)
+    }
+
+    public func pasteField(_ field: ExtractedField) {
+        pasteFieldText(field.value)
+    }
+
+    public func pasteFieldText(_ text: String) {
+        pasteContent(.text(text))
+    }
+
+    public func copyField(_ field: ExtractedField) {
+        copyFieldText(field.value)
+    }
+
+    public func copyFieldText(_ text: String) {
+        PasteBack.write(.text(text))
+        monitor.suppress(seconds: 1.5)
+        HapticHelper.feedback()
+        ToastHUD.shared.show(
+            icon: "doc.on.doc.fill",
+            title: L10n.tr("action.copied", lang: settings.appLanguage),
+            subtitle: text,
+            duration: 1.5
+        )
+    }
+
+    public func pasteField(at index: Int) {
+        guard let item = selectedItem else { return }
+        let list = fields(for: item)
+        guard list.indices.contains(index) else { return }
+        pasteField(list[index])
+    }
+
+    public func copyField(at index: Int) {
+        guard let item = selectedItem else { return }
+        let list = fields(for: item)
+        guard list.indices.contains(index) else { return }
+        copyField(list[index])
+    }
+
+    public func moveFieldSelection(_ delta: Int) {
+        guard let item = selectedItem else { return }
+        let list = fields(for: item)
+        guard !list.isEmpty else { return }
+        if let current = selectedFieldIndex {
+            let next = current + delta
+            if next < 0 {
+                selectedFieldIndex = nil
+            } else {
+                selectedFieldIndex = min(next, list.count - 1)
+            }
+        } else if delta > 0 {
+            selectedFieldIndex = 0
+        }
     }
 
     public func togglePin(_ item: ClipItem? = nil) {

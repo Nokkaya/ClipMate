@@ -242,6 +242,25 @@ final class PanelController {
         let cmdShiftOnly = flags.contains(.command) && flags.contains(.shift)
             && !flags.contains(.option) && !flags.contains(.control)
 
+        let optOnly = flags.contains(.option)
+            && !flags.contains(.command) && !flags.contains(.control) && !flags.contains(.shift)
+        let optShiftOnly = flags.contains(.option) && flags.contains(.shift)
+            && !flags.contains(.command) && !flags.contains(.control)
+
+        // ⌥1 ~ ⌥9：极速粘贴选中条目的局部字段（如手机号、邮箱、JSON 键）
+        if optOnly, let chars = event.charactersIgnoringModifiers,
+           let number = Int(chars), (1...9).contains(number) {
+            viewModel.pasteField(at: number - 1)
+            return true
+        }
+
+        // ⌥⇧1 ~ ⌥⇧9：极速复制选中条目的局部字段
+        if optShiftOnly, let chars = event.charactersIgnoringModifiers,
+           let number = Int(chars), (1...9).contains(number) {
+            viewModel.copyField(at: number - 1)
+            return true
+        }
+
         // 编辑浮层：除 Esc 外放行给 TextEditor
         if viewModel.showEditOverlay {
             if event.keyCode == 53 { viewModel.showEditOverlay = false; return true }
@@ -279,8 +298,17 @@ final class PanelController {
                 viewModel.moveSelection(event.keyCode == 125 ? 1 : -1)
             }
             return true
+        case 123, 124: // 左右方向键：在选中行的局部字段间移动焦点
+            if event.keyCode == 124 {
+                viewModel.moveFieldSelection(1)
+            } else {
+                viewModel.moveFieldSelection(-1)
+            }
+            return true
         case 36: // Return
-            if flags.contains(.command) && flags.contains(.shift) {
+            if let fieldIdx = viewModel.selectedFieldIndex {
+                viewModel.pasteField(at: fieldIdx)
+            } else if flags.contains(.command) && flags.contains(.shift) {
                 viewModel.pasteQueue()          // ⌘⇧⏎ 顺序粘贴队列
             } else if flags.contains(.command) && flags.contains(.option) {
                 viewModel.pasteAsPlainText()    // ⌘⌥⏎ 粘贴为纯文本
@@ -313,8 +341,10 @@ final class PanelController {
                 return true
             }
             return false
-        case 53: // Esc：清多选 → 收起 AI 侧边栏 → 清搜索词 → 隐藏（预览/浮层已在前面拦截）
-            if viewModel.multiSelectedIDs.count > 0 {
+        case 53: // Esc：退字段焦点 → 清多选 → 收起 AI 侧边栏 → 清搜索词 → 隐藏
+            if viewModel.selectedFieldIndex != nil {
+                viewModel.selectedFieldIndex = nil
+            } else if viewModel.multiSelectedIDs.count > 0 {
                 viewModel.clearMultiSelection()
             } else if viewModel.isAISidebarOpen {
                 viewModel.toggleAISidebar()
@@ -338,7 +368,10 @@ final class PanelController {
             viewModel.toggleAISidebar()
             return true
         case 8 where cmdOnly: // ⌘C 复制 / 合并复制
-            if viewModel.multiSelectedIDs.count > 1 {
+            if let fieldIdx = viewModel.selectedFieldIndex {
+                viewModel.copyField(at: fieldIdx)
+                return true
+            } else if viewModel.multiSelectedIDs.count > 1 {
                 viewModel.copyMulti()
                 return true
             } else if viewModel.query.isEmpty {

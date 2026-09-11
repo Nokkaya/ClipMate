@@ -8,6 +8,7 @@ struct PreviewOverlay: View {
     @State private var isLoadingMedia = false
     @State private var isRawJSON = false
     @State private var copiedFeedback = false
+    @State private var selectedField: ExtractedField?
 
     var body: some View {
         if let item = viewModel.previewItem {
@@ -23,6 +24,10 @@ struct PreviewOverlay: View {
                 VStack(alignment: .leading, spacing: 10) {
                     header(item)
                     content(item)
+                    let fields = ContentExtractor.extractFields(from: item)
+                    if !fields.isEmpty {
+                        extractedFieldsBar(fields)
+                    }
                     metaGrid(item)
                     footer(item)
                 }
@@ -44,6 +49,7 @@ struct PreviewOverlay: View {
                     previewImage = nil
                     isRawJSON = false
                     copiedFeedback = false
+                    selectedField = nil
                     guard item.kind == .image || item.kind == .pdf else { return }
                     guard let url = viewModel.store.imageURL(for: item) else { return }
                     isLoadingMedia = true
@@ -509,7 +515,12 @@ struct PreviewOverlay: View {
             }
 
             ScrollView {
-                if let numberText = NumberRecognizer.displayText(item.plainText) {
+                if let selected = selectedField {
+                    Text(TextHighlighter.highlight(text: item.plainText, query: selected.value))
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                } else if let numberText = NumberRecognizer.displayText(item.plainText) {
                     // 号码类内容：分组 + 放大等宽，便于逐位核对
                     Text(numberText)
                         .font(.system(size: 15, weight: .medium, design: .monospaced))
@@ -627,21 +638,38 @@ struct PreviewOverlay: View {
 
                 // 主要操作：复制 / 粘贴
                 HStack(spacing: 6) {
-                    Button {
-                        viewModel.copy(item: item)
-                        viewModel.previewItem = nil
-                    } label: {
-                        Label(L10n.tr("action.copy"), systemImage: "doc.on.doc")
-                    }
-                    .clipMateGlass(size: .small)
+                    if let selected = selectedField {
+                        Button {
+                            viewModel.copyField(selected)
+                        } label: {
+                            Label(L10n.tr("action.copy_only", lang: viewModel.settings.appLanguage), systemImage: "doc.on.doc")
+                        }
+                        .clipMateGlass(size: .small)
 
-                    Button {
-                        viewModel.paste(item: item)
-                        viewModel.previewItem = nil
-                    } label: {
-                        Label(L10n.tr("action.paste"), systemImage: "arrow.right.doc.on.clipboard")
+                        Button {
+                            viewModel.previewItem = nil
+                            viewModel.pasteField(selected)
+                        } label: {
+                            Label(L10n.tr("action.paste", lang: viewModel.settings.appLanguage), systemImage: "arrow.right.doc.on.clipboard")
+                        }
+                        .clipMateAccent(size: .small)
+                    } else {
+                        Button {
+                            viewModel.copy(item: item)
+                            viewModel.previewItem = nil
+                        } label: {
+                            Label(L10n.tr("action.copy"), systemImage: "doc.on.doc")
+                        }
+                        .clipMateGlass(size: .small)
+
+                        Button {
+                            viewModel.paste(item: item)
+                            viewModel.previewItem = nil
+                        } label: {
+                            Label(L10n.tr("action.paste"), systemImage: "arrow.right.doc.on.clipboard")
+                        }
+                        .clipMateAccent(size: .small)
                     }
-                    .clipMateAccent(size: .small)
                 }
             }
 
@@ -658,6 +686,60 @@ struct PreviewOverlay: View {
 
     private func filePaths(_ item: ClipItem) -> [String] {
         item.plainText.components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
+
+    private func extractedFieldsBar(_ fields: [ExtractedField]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label(L10n.tr("preview.extracted_fields", lang: viewModel.settings.appLanguage), systemImage: "sparkle.magnifyingglass")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if selectedField != nil {
+                    Button {
+                        selectedField = nil
+                    } label: {
+                        Text(L10n.tr("action.reset", lang: viewModel.settings.appLanguage))
+                            .font(.system(size: 9.5))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    ForEach(fields) { field in
+                        let isSelected = selectedField?.id == field.id
+                        Button {
+                            selectedField = isSelected ? nil : field
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: field.kind.systemImage)
+                                    .font(.system(size: 8))
+                                Text("\(field.label): \(field.value)")
+                                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.05))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: 1)
+                            )
+                            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(field.value)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

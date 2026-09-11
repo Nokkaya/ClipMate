@@ -35,12 +35,26 @@ public struct ClipRowView: View, Equatable {
     public var searchHighlight: String = ""
     public var language: AppLanguage = .system
     public var theme: AppTheme = .default
+    public var fields: [ExtractedField] = []
+    public var selectedFieldIndex: Int? = nil
+    public var isExpanded: Bool = false
+    public var onToggleExpand: (() -> Void)? = nil
+    public var onPasteField: ((ExtractedField) -> Void)? = nil
+    public var onCopyField: ((ExtractedField) -> Void)? = nil
+    public var onCopyOCR: (() -> Void)? = nil
     @State private var hovered = false
 
     public init(item: ClipItem, selected: Bool, multiSelected: Bool = false,
                 thumbnail: NSImage? = nil, searchHighlight: String = "",
                 language: AppLanguage = .system,
-                theme: AppTheme = .default) {
+                theme: AppTheme = .default,
+                fields: [ExtractedField] = [],
+                selectedFieldIndex: Int? = nil,
+                isExpanded: Bool = false,
+                onToggleExpand: (() -> Void)? = nil,
+                onPasteField: ((ExtractedField) -> Void)? = nil,
+                onCopyField: ((ExtractedField) -> Void)? = nil,
+                onCopyOCR: (() -> Void)? = nil) {
         self.item = item
         self.selected = selected
         self.multiSelected = multiSelected
@@ -48,6 +62,13 @@ public struct ClipRowView: View, Equatable {
         self.searchHighlight = searchHighlight
         self.language = language
         self.theme = theme
+        self.fields = fields
+        self.selectedFieldIndex = selectedFieldIndex
+        self.isExpanded = isExpanded
+        self.onToggleExpand = onToggleExpand
+        self.onPasteField = onPasteField
+        self.onCopyField = onCopyField
+        self.onCopyOCR = onCopyOCR
     }
 
     public static func == (lhs: ClipRowView, rhs: ClipRowView) -> Bool {
@@ -63,7 +84,10 @@ public struct ClipRowView: View, Equatable {
         lhs.item.title == rhs.item.title &&
         lhs.item.meta == rhs.item.meta &&
         lhs.item.displayText == rhs.item.displayText &&
-        lhs.thumbnail === rhs.thumbnail
+        lhs.thumbnail === rhs.thumbnail &&
+        lhs.fields == rhs.fields &&
+        lhs.selectedFieldIndex == rhs.selectedFieldIndex &&
+        lhs.isExpanded == rhs.isExpanded
     }
 
     public var body: some View {
@@ -162,8 +186,30 @@ public struct ClipRowView: View, Equatable {
                             .foregroundStyle(item.kind.tintColor)
                     }
                 }
+
+                if selected && !fields.isEmpty {
+                    fieldSection
+                }
             }
             Spacer(minLength: 4)
+            if selected && item.kind == .image && !item.plainText.isEmpty {
+                Button {
+                    onCopyOCR?()
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "text.viewfinder")
+                            .font(.system(size: 8.5))
+                        Text(L10n.tr("action.copy_ocr", lang: language))
+                            .font(.system(size: 9, weight: .medium))
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(theme.accent.opacity(0.14)))
+                    .foregroundStyle(theme.accent)
+                }
+                .buttonStyle(.plain)
+                .help(L10n.tr("action.copy_ocr", lang: language))
+            }
             if multiSelected && !selected {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 11))
@@ -243,5 +289,100 @@ public struct ClipRowView: View, Equatable {
                 .foregroundStyle(item.kind.tintColor)
                 .frame(width: 22)
         }
+    }
+
+    @ViewBuilder
+    private var fieldSection: some View {
+        let displayFields = isExpanded ? fields : Array(fields.prefix(3))
+        FlowLayout(spacing: 4, rowSpacing: 4) {
+            ForEach(Array(displayFields.enumerated()), id: \.element.id) { index, field in
+                FieldPillView(
+                    field: field,
+                    index: index,
+                    isFocused: selectedFieldIndex == index,
+                    theme: theme,
+                    language: language,
+                    onPaste: { onPasteField?(field) },
+                    onCopy: { onCopyField?(field) }
+                )
+            }
+            if fields.count > 3 {
+                Button {
+                    onToggleExpand?()
+                } label: {
+                    Text(isExpanded ? L10n.tr("action.collapse_fields", lang: language) : String(format: L10n.tr("action.more_fields", lang: language), fields.count - 3))
+                        .font(.system(size: 9, weight: .medium))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.primary.opacity(0.06)))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 2)
+    }
+}
+
+/// 局部字段胶囊视图
+struct FieldPillView: View {
+    let field: ExtractedField
+    let index: Int
+    let isFocused: Bool
+    let theme: AppTheme
+    let language: AppLanguage
+    let onPaste: () -> Void
+    let onCopy: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Button(action: onPaste) {
+                HStack(spacing: 3) {
+                    Image(systemName: field.kind.systemImage)
+                        .font(.system(size: 8))
+                        .foregroundStyle(isFocused ? theme.accent : Color.secondary)
+
+                    Text("\(field.label):")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.secondary)
+
+                    Text(field.value)
+                        .font(.system(size: 9))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(Color.primary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onCopy) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 7.5))
+                    .foregroundStyle(hovered ? theme.accent : Color.secondary.opacity(0.7))
+                    .padding(.horizontal, 1)
+            }
+            .buttonStyle(.plain)
+            .help(L10n.tr("action.copy_only", lang: language))
+
+            if index < 3 {
+                Text("⌥\(index + 1)")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(isFocused ? theme.accent : Color.secondary.opacity(0.5))
+            }
+        }
+        .padding(.leading, 5)
+        .padding(.trailing, 4)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(isFocused ? theme.accent.opacity(0.2) : (hovered ? Color.primary.opacity(0.08) : Color.primary.opacity(0.04)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(isFocused ? theme.accent : (hovered ? Color.primary.opacity(0.18) : Color.primary.opacity(0.08)), lineWidth: 1)
+        )
+        .onHover { hovered = $0 }
+        .help(field.value)
     }
 }

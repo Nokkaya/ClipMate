@@ -403,14 +403,23 @@ struct ClipList: View {
                     .frame(width: 0, height: 0)
                 LazyVStack(spacing: 2) {
                     ForEach(viewModel.items) { item in
+                        let isSelected = item.id == viewModel.selectedID
+                        let fields = isSelected ? viewModel.fields(for: item) : []
                         ClipRowView(
                             item: item,
-                            selected: item.id == viewModel.selectedID,
+                            selected: isSelected,
                             multiSelected: viewModel.multiSelectedIDs.contains(item.id),
                             thumbnail: viewModel.thumbnail(for: item),
                             searchHighlight: viewModel.query,
                             language: viewModel.settings.appLanguage,
-                            theme: viewModel.settings.appTheme
+                            theme: viewModel.settings.appTheme,
+                            fields: fields,
+                            selectedFieldIndex: isSelected ? viewModel.selectedFieldIndex : nil,
+                            isExpanded: viewModel.isFieldsExpanded(for: item.id),
+                            onToggleExpand: { viewModel.toggleExpandFields(for: item.id) },
+                            onPasteField: { field in viewModel.pasteField(field) },
+                            onCopyField: { field in viewModel.copyField(field) },
+                            onCopyOCR: { viewModel.copyFieldText(item.plainText) }
                         )
                         .equatable()
 
