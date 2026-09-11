@@ -11,6 +11,13 @@ public enum PasteboardContent {
     case pdf(data: Data, plain: String)
 }
 
+/// 粘贴回退原因
+public enum PasteFallbackReason: Equatable {
+    case permissionDenied
+    case targetUnavailable
+    case pasteFailed
+}
+
 /// 粘贴回写：写剪贴板 → 对前台应用合成 ⌘V → 恢复原剪贴板（不污染用户剪贴板）。
 /// 合成按键依赖辅助功能权限；未授权时降级为"仅写入剪贴板"。
 public enum PasteBack {
@@ -30,7 +37,8 @@ public enum PasteBack {
 
     // MARK: - 写入
 
-    public static func write(_ content: PasteboardContent) {
+    @discardableResult
+    public static func write(_ content: PasteboardContent) -> Int {
         let pb = NSPasteboard.general
         pb.clearContents()
         switch content {
@@ -57,6 +65,7 @@ public enum PasteBack {
             pb.setData(data, forType: .pdf)
             if !plain.isEmpty { pb.setString(plain, forType: .string) }
         }
+        return pb.changeCount
     }
 
     // MARK: - 剪贴板快照（粘贴后恢复，不覆盖用户剪贴板）
@@ -77,6 +86,16 @@ public enum PasteBack {
         for (type, data) in snapshot {
             pb.setData(data, forType: type)
         }
+    }
+
+    /// 校验是否允许恢复旧快照：
+    /// 只有当剪贴板当前的 changeCount 仍等于本次写入后的 changeCount，
+    /// 且仍带有 ClipMate 自身的 ownedMarker 标记时，才恢复旧快照。
+    /// 若用户或第三方在粘贴期间新复制了内容，必须坚决放弃恢复，完好保护新内容。
+    public static func shouldRestorePasteboard(writtenChangeCount: Int, pb: NSPasteboard = .general) -> Bool {
+        guard pb.changeCount == writtenChangeCount else { return false }
+        guard pb.types?.contains(ownedMarker) == true else { return false }
+        return true
     }
 
     // MARK: - 合成 ⌘V
@@ -105,17 +124,47 @@ public enum PasteBack {
     }
 
     /// 完整粘贴流程（主线程调用）：写 → 粘贴 → 延迟恢复原剪贴板。
-    public static func paste(content: PasteboardContent,
-                             toPID pid: pid_t?,
-                             suppress: ((TimeInterval) -> Void)? = nil) {
+    /// 当目标不可用、缺少辅助功能权限或事件派发失败时，保留内容在剪贴板并回调 fallback。
+    public static func paste(
+        content: PasteboardContent,
+        toPID pid: pid_t?,
+        targetApp: NSRunningApplication? = nil,
+        suppress: ((TimeInterval) -> Void)? = nil,
+        onFallback: ((PasteFallbackReason) -> Void)? = nil
+    ) {
         let snapshot = snapshotPasteboard()
-        write(content)
+        let writtenChangeCount = write(content)
         suppress?(1.8)
-        guard let pid, pid > 0 else { return }
+
+        if let targetApp, targetApp.isTerminated {
+            onFallback?(.targetUnavailable)
+            return
+        }
+        guard let pid, pid > 0 else {
+            onFallback?(.targetUnavailable)
+            return
+        }
+
+        guard isAccessibilityGranted() else {
+            promptAccessibility()
+            onFallback?(.permissionDenied)
+            return
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            if let targetApp, targetApp.isTerminated {
+                onFallback?(.targetUnavailable)
+                return
+            }
             pasteToFrontmost(pid: pid) { success in
+                if !success {
+                    onFallback?(.pasteFailed)
+                    return
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                    if success, let snapshot { restorePasteboard(snapshot) }
+                    if let snapshot, shouldRestorePasteboard(writtenChangeCount: writtenChangeCount) {
+                        restorePasteboard(snapshot)
+                    }
                 }
             }
         }
@@ -123,30 +172,64 @@ public enum PasteBack {
 
     /// 粘贴队列：按顺序逐条粘贴（每条间隔 0.55s），结束后恢复原剪贴板。
     /// 无目标/无 AX 权限时降级为把全部内容按行拼接写入剪贴板。
-    public static func pasteSequence(contents: [PasteboardContent],
-                                     toPID pid: pid_t?,
-                                     suppress: ((TimeInterval) -> Void)? = nil) {
+    public static func pasteSequence(
+        contents: [PasteboardContent],
+        toPID pid: pid_t?,
+        targetApp: NSRunningApplication? = nil,
+        suppress: ((TimeInterval) -> Void)? = nil,
+        onFallback: ((PasteFallbackReason) -> Void)? = nil
+    ) {
         guard !contents.isEmpty else { return }
-        guard let pid, pid > 0, isAccessibilityGranted() else {
-            let texts = contents.compactMap { plainText($0) }
-            if !texts.isEmpty {
-                write(.text(texts.joined(separator: "\n")))
-                suppress?(1.5)
-            }
+
+        if let targetApp, targetApp.isTerminated {
+            writePlainTextFallback(contents: contents, suppress: suppress)
+            onFallback?(.targetUnavailable)
             return
         }
+        guard let pid, pid > 0 else {
+            writePlainTextFallback(contents: contents, suppress: suppress)
+            onFallback?(.targetUnavailable)
+            return
+        }
+        guard isAccessibilityGranted() else {
+            writePlainTextFallback(contents: contents, suppress: suppress)
+            promptAccessibility()
+            onFallback?(.permissionDenied)
+            return
+        }
+
         let snapshot = snapshotPasteboard()
         suppress?(2.0 + Double(contents.count))
         var delay = 0.15
+        var lastWrittenChangeCount = 0
+
         for content in contents {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                write(content)
-                _ = pasteToFrontmost(pid: pid)
+                if let targetApp, targetApp.isTerminated {
+                    onFallback?(.targetUnavailable)
+                    return
+                }
+                lastWrittenChangeCount = write(content)
+                let posted = pasteToFrontmost(pid: pid)
+                if !posted {
+                    onFallback?(.pasteFailed)
+                }
             }
             delay += 0.55
         }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.4) {
-            if let snapshot { restorePasteboard(snapshot) }
+            if let snapshot, shouldRestorePasteboard(writtenChangeCount: lastWrittenChangeCount) {
+                restorePasteboard(snapshot)
+            }
+        }
+    }
+
+    private static func writePlainTextFallback(contents: [PasteboardContent], suppress: ((TimeInterval) -> Void)?) {
+        let texts = contents.compactMap { plainText($0) }
+        if !texts.isEmpty {
+            _ = write(.text(texts.joined(separator: "\n")))
+            suppress?(1.5)
         }
     }
 

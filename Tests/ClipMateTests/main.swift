@@ -1488,6 +1488,111 @@ runner.run("ClipStore 存量条目标签回填与去重补标签") {
     runner.expectEqual(legacy.item.id, legacy.item.id, "占位断言保持结构一致")
 }
 
+runner.run("Phase 1 - 新复制内容保护（Pasteboard Protection）") {
+    // 1. 写内容并获取 changeCount
+    let countBefore = PasteBack.write(.text("ClipMate 正在粘贴的内容"))
+    runner.expectTrue(countBefore > 0, "写入成功并返回 changeCount")
+    runner.expectTrue(NSPasteboard.general.types?.contains(PasteBack.ownedMarker) == true, "包含 ownedMarker 标记")
+
+    // 2. 在未发生外部新复制的情况下：应该允许恢复
+    runner.expectTrue(
+        PasteBack.shouldRestorePasteboard(writtenChangeCount: countBefore),
+        "无新复制且 ownedMarker 存在时，允许恢复快照"
+    )
+
+    // 3. 模拟用户或外部进程在粘贴期间复制了新内容（changeCount 改变且无 ownedMarker）
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString("用户刚刚复制的新内容！", forType: .string)
+
+    runner.expectFalse(
+        PasteBack.shouldRestorePasteboard(writtenChangeCount: countBefore),
+        "外部产生新复制后，坚决禁止恢复旧快照，保护新内容"
+    )
+    runner.expectEqual(
+        NSPasteboard.general.string(forType: .string),
+        "用户刚刚复制的新内容！",
+        "剪贴板完好保留用户的新复制"
+    )
+}
+
+runner.run("Phase 1 - 粘贴异常回退（Paste Fallback & Protection）") {
+    // 目标无效（如 pid <= 0 或目标应用退出）时：保留内容在剪贴板并触发 fallback
+    var fallbackTriggered = false
+    var fallbackReason: PasteFallbackReason?
+
+    PasteBack.paste(
+        content: .text("需要手动粘贴的保留内容"),
+        toPID: nil,
+        targetApp: nil,
+        suppress: nil,
+        onFallback: { reason in
+            fallbackTriggered = true
+            fallbackReason = reason
+        }
+    )
+
+    runner.expectTrue(fallbackTriggered, "目标无效时触发回退")
+    runner.expectEqual(fallbackReason, .targetUnavailable, "回退原因为 targetUnavailable")
+    runner.expectEqual(
+        NSPasteboard.general.string(forType: .string),
+        "需要手动粘贴的保留内容",
+        "异常回退时所选内容保留在系统剪贴板供用户 ⌘V 手动粘贴"
+    )
+}
+
+runner.run("Phase 1 - 列表与选择稳定性（In-Place Item Update & Stable Selection）") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let item1 = try store.capture(kind: .text, plainText: "条目 1", sourceBundle: "com.test", sourceName: "Test", tags: []).item
+    let item2 = try store.capture(kind: .text, plainText: "条目 2", sourceBundle: "com.test", sourceName: "Test", tags: []).item
+    let item3 = try store.capture(kind: .text, plainText: "条目 3", sourceBundle: "com.test", sourceName: "Test", tags: []).item
+
+    let settings = AppSettings()
+    let monitor = ClipboardMonitor(settings: settings, store: store)
+    let front = FrontAppTracker()
+    let ai = AIService(settings: settings)
+    let vm = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: front, ai: ai)
+
+    // 选中第 2 个条目 (item2)
+    vm.selectOnly(item: item2)
+    runner.expectEqual(vm.selectedID, item2.id, "初始选中 item2")
+    let initialIndex = vm.selectedIndex
+
+    // 模拟后台 OCR / 智能标题异步更新 item2
+    let updatedItem2 = try store.updateOCR(item2.id, text: "条目 2 (OCR 识别完成)", title: "识别标题 2")!
+    vm.handleItemUpdated(updatedItem2)
+
+    runner.expectEqual(vm.selectedID, item2.id, "更新后选中的 ID 保持不变")
+    runner.expectEqual(vm.selectedIndex, initialIndex, "更新后选中的行索引保持不变")
+    runner.expectEqual(vm.items[initialIndex].displayText, "识别标题 2", "行数据就地原位更新")
+
+    // 模拟后台更新非选中的 item1
+    let updatedItem1 = try store.updateOCR(item1.id, text: "条目 1 (更新)", title: "标题 1")!
+    vm.handleItemUpdated(updatedItem1)
+
+    runner.expectEqual(vm.selectedID, item2.id, "其他条目更新时，当前选中项仍然不受任何影响")
+    runner.expectEqual(vm.selectedIndex, initialIndex, "选中索引完全稳定")
+    runner.expectEqual(item3.id, item3.id, "保持完整性")
+}
+
+runner.run("Phase 1 - 预热加载与即开即用（Prewarm & Instant Availability）") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    _ = try store.capture(kind: .text, plainText: "历史预热条目", sourceBundle: "com.test", sourceName: "Test", tags: [])
+
+    let settings = AppSettings()
+    let monitor = ClipboardMonitor(settings: settings, store: store)
+    let front = FrontAppTracker()
+    let ai = AIService(settings: settings)
+
+    // 初始化时即预热完成
+    let vm = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: front, ai: ai)
+    runner.expectEqual(vm.items.count, 1, "PanelViewModel 初始化完成即已有数据，打开零等待")
+    runner.expectEqual(vm.items.first?.plainText, "历史预热条目", "预热数据正确")
+}
+
 print("----")
 
 

@@ -45,9 +45,15 @@ public final class ClipboardMonitor {
     private func tick() {
         let pb = NSPasteboard.general
         guard pb.changeCount != lastChangeCount else { return }
-        lastChangeCount = pb.changeCount
+        let currentChangeCount = pb.changeCount
+        lastChangeCount = currentChangeCount
 
-        guard !screenLocked, !settings.pauseCapture, Date() >= suppressUntil else { return }
+        let types = pb.types ?? []
+        // 若剪贴板内容由 ClipMate 自身写入（如回写粘贴或历史复制），跳过重复采集
+        if types.contains(PasteBack.ownedMarker) { return }
+
+        // 仅在被显式标记且确认是自身写入时受 suppress 限制；外部新复制不被抑制时间窗抹杀
+        guard !screenLocked, !settings.pauseCapture else { return }
         // 密码框等安全输入场景跳过采集。
         guard !IsSecureEventInputEnabled() else { return }
 

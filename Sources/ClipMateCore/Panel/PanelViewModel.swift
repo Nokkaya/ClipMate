@@ -94,6 +94,9 @@ public final class PanelViewModel: ObservableObject {
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
+
+        // 预热加载历史条目，确保面板初次唤起时即开即用零等待
+        reload(resetSelection: false)
     }
 
     // MARK: - 数据
@@ -218,6 +221,18 @@ public final class PanelViewModel: ObservableObject {
         reload()
     }
 
+    /// 后台异步识别（OCR/智能标题/链接元数据等）完成后就地更新单条，不重排列表、不改变选中项与按钮位置
+    public func handleItemUpdated(_ item: ClipItem) {
+        thumbCache.removeObject(forKey: NSNumber(value: item.id))
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            items[index] = item
+            if selectedID == item.id {
+                selectedIndex = index
+                syncAITargetIfNeeded()
+            }
+        }
+    }
+
     public var selectedItem: ClipItem? {
         if let id = selectedID, let item = items.first(where: { $0.id == id }) {
             return item
@@ -317,12 +332,40 @@ public final class PanelViewModel: ObservableObject {
         guard let content else { return }
         let target = pasteTarget
         dismiss?()
-        PasteBack.paste(content: content, toPID: target?.processIdentifier) { [weak self] seconds in
-            self?.monitor.suppress(seconds: seconds)
+        PasteBack.paste(
+            content: content,
+            toPID: target?.processIdentifier,
+            targetApp: target,
+            suppress: { [weak self] seconds in
+                self?.monitor.suppress(seconds: seconds)
+            },
+            onFallback: { [weak self] reason in
+                self?.handlePasteFallback(reason)
+            }
+        )
+    }
+
+    public func handlePasteFallback(_ reason: PasteFallbackReason) {
+        NSSound(named: "Basso")?.play()
+        let title: String
+        let subtitle: String
+        switch reason {
+        case .permissionDenied:
+            title = L10n.tr("toast.paste_fallback.permission", lang: settings.appLanguage)
+            subtitle = L10n.tr("toast.paste_fallback.permission_hint", lang: settings.appLanguage)
+        case .targetUnavailable:
+            title = L10n.tr("toast.paste_fallback.target_lost", lang: settings.appLanguage)
+            subtitle = L10n.tr("toast.paste_fallback.manual_hint", lang: settings.appLanguage)
+        case .pasteFailed:
+            title = L10n.tr("toast.paste_fallback.title", lang: settings.appLanguage)
+            subtitle = L10n.tr("toast.paste_fallback.manual_hint", lang: settings.appLanguage)
         }
-        if target == nil || !PasteBack.isAccessibilityGranted() {
-            NSSound(named: "Basso")?.play() // 降级：仅写入剪贴板，提示用户手动 ⌘V
-        }
+        ToastHUD.shared.show(
+            icon: "exclamationmark.triangle.fill",
+            title: title,
+            subtitle: subtitle,
+            duration: 2.8
+        )
     }
 
     public func copySelected() {
@@ -450,12 +493,17 @@ public final class PanelViewModel: ObservableObject {
         queue.removeAll()
         dismiss?()
         guard !contents.isEmpty else { return }
-        PasteBack.pasteSequence(contents: contents, toPID: target?.processIdentifier) { [weak self] seconds in
-            self?.monitor.suppress(seconds: seconds)
-        }
-        if target == nil || !PasteBack.isAccessibilityGranted() {
-            NSSound(named: "Basso")?.play()
-        }
+        PasteBack.pasteSequence(
+            contents: contents,
+            toPID: target?.processIdentifier,
+            targetApp: target,
+            suppress: { [weak self] seconds in
+                self?.monitor.suppress(seconds: seconds)
+            },
+            onFallback: { [weak self] reason in
+                self?.handlePasteFallback(reason)
+            }
+        )
     }
 
     // MARK: - 详情预览

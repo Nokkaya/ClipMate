@@ -102,7 +102,7 @@ final class AppModel {
             }
         }
         monitor.onItemUpdated = { [weak self] item in
-            self?.panel.viewModel.handleCaptured(item)
+            self?.panel.viewModel.handleItemUpdated(item)
         }
         monitor.start()
 
