@@ -405,6 +405,8 @@ struct ClipList: View {
                     ForEach(viewModel.items) { item in
                         let isSelected = item.id == viewModel.selectedID
                         let fields = isSelected ? viewModel.fields(for: item) : []
+                        let recAction = isSelected ? viewModel.recommendedAction(for: item) : nil
+                        let actionResult = isSelected ? viewModel.activeActionResult : nil
                         ClipRowView(
                             item: item,
                             selected: isSelected,
@@ -419,7 +421,17 @@ struct ClipList: View {
                             onToggleExpand: { viewModel.toggleExpandFields(for: item.id) },
                             onPasteField: { field in viewModel.pasteField(field) },
                             onCopyField: { field in viewModel.copyField(field) },
-                            onCopyOCR: { viewModel.copyFieldText(item.plainText) }
+                            onCopyOCR: { viewModel.copyFieldText(item.plainText) },
+                            recommendedAction: recAction,
+                            activeActionResult: actionResult,
+                            onExecuteAction: { action in viewModel.executeAction(action, on: item) },
+                            onCancelAction: { viewModel.cancelAction() },
+                            onRetryAction: { viewModel.retryAction() },
+                            onToggleOriginal: { viewModel.toggleActionResultOriginal() },
+                            onDismissAction: { viewModel.dismissActionResult() },
+                            onPasteActionResult: { viewModel.pasteActionResult() },
+                            onCopyActionResult: { viewModel.copyActionResult() },
+                            onChangeTargetLanguage: { lang in viewModel.executeAction(.translate, on: item, targetLanguage: lang) }
                         )
                         .equatable()
 

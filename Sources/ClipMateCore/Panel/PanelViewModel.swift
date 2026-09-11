@@ -2,6 +2,33 @@ import SwiftUI
 import AppKit
 import Combine
 
+/// 就地动作处理结果模型（不覆盖原始条目，独立展示与操作）
+public struct InlineActionResult: Equatable {
+    public let itemID: Int64
+    public let actionKind: ContentActionKind
+    public var text: String
+    public var originalText: String
+    public var badge: String?
+    public var errorMessage: String?
+    public var isStreaming: Bool
+    public var showOriginal: Bool
+    public var targetLanguage: String?
+
+    public init(itemID: Int64, actionKind: ContentActionKind, text: String, originalText: String,
+                badge: String? = nil, errorMessage: String? = nil, isStreaming: Bool = false,
+                showOriginal: Bool = false, targetLanguage: String? = nil) {
+        self.itemID = itemID
+        self.actionKind = actionKind
+        self.text = text
+        self.originalText = originalText
+        self.badge = badge
+        self.errorMessage = errorMessage
+        self.isStreaming = isStreaming
+        self.showOriginal = showOriginal
+        self.targetLanguage = targetLanguage
+    }
+}
+
 /// 主面板状态与动作。所有公开方法约定在主线程调用（SwiftUI/键盘监听/采集回调均在主线程）。
 public final class PanelViewModel: ObservableObject {
     @Published public var query = ""
@@ -13,6 +40,10 @@ public final class PanelViewModel: ObservableObject {
                 selectedID = items[selectedIndex].id
             }
             selectedFieldIndex = nil
+            if let act = activeActionResult, act.itemID != selectedID {
+                cancelAction()
+                activeActionResult = nil
+            }
             syncAITargetIfNeeded()
         }
     }
@@ -23,6 +54,12 @@ public final class PanelViewModel: ObservableObject {
     /// 展开全部字段的条目 ID 集合
     @Published public var expandedFieldItemIDs: Set<Int64> = []
     private var fieldsCache: [Int64: [ExtractedField]] = [:]
+
+    /// 就地动作处理结果（不覆盖原文，支持对比、复制、粘贴）
+    @Published public var activeActionResult: InlineActionResult? = nil
+    private var actionCache: [Int64: RecommendedAction?] = [:]
+    private var actionTask: Task<Void, Never>?
+
     @Published public var showEditOverlay = false
     @Published public var editText = ""
     @Published public var showConfirmClear = false
@@ -225,6 +262,7 @@ public final class PanelViewModel: ObservableObject {
     public func handleCaptured(_ item: ClipItem) {
         thumbCache.removeObject(forKey: NSNumber(value: item.id))
         fieldsCache.removeValue(forKey: item.id)
+        actionCache.removeValue(forKey: item.id)
         reload()
     }
 
@@ -232,6 +270,7 @@ public final class PanelViewModel: ObservableObject {
     public func handleItemUpdated(_ item: ClipItem) {
         thumbCache.removeObject(forKey: NSNumber(value: item.id))
         fieldsCache.removeValue(forKey: item.id)
+        actionCache.removeValue(forKey: item.id)
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index] = item
             if selectedID == item.id {
@@ -460,6 +499,156 @@ public final class PanelViewModel: ObservableObject {
         } else if delta > 0 {
             selectedFieldIndex = 0
         }
+    }
+
+    // MARK: - 第三阶段：按内容提供一键处理
+
+    public func recommendedAction(for item: ClipItem) -> RecommendedAction? {
+        if let cached = actionCache[item.id] { return cached }
+        let action = ContentActionEngine.recommendAction(
+            for: item.plainText,
+            kind: item.kind,
+            tags: item.tags,
+            appLanguage: settings.appLanguage
+        )
+        actionCache[item.id] = action
+        return action
+    }
+
+    public func executeAction(_ actionKind: ContentActionKind, on item: ClipItem? = nil, targetLanguage: String? = nil) {
+        let target = item ?? selectedItem
+        guard let target else { return }
+
+        cancelAction()
+
+        switch actionKind {
+        case .fixLineBreaks:
+            let fixed = ContentActionEngine.fixLineBreaks(target.plainText)
+            activeActionResult = InlineActionResult(
+                itemID: target.id,
+                actionKind: .fixLineBreaks,
+                text: fixed,
+                originalText: target.plainText,
+                badge: L10n.tr("action.diff_breaks_fixed", lang: settings.appLanguage)
+            )
+            HapticHelper.feedback()
+
+        case .deduplicateList:
+            let (result, removedCount) = ContentActionEngine.deduplicateList(target.plainText)
+            let badge = String(format: L10n.tr("action.diff_deduped", lang: settings.appLanguage), removedCount)
+            activeActionResult = InlineActionResult(
+                itemID: target.id,
+                actionKind: .deduplicateList,
+                text: result,
+                originalText: target.plainText,
+                badge: badge
+            )
+            HapticHelper.feedback()
+
+        case .formatJSON:
+            let res = ContentActionEngine.formatJSON(target.plainText)
+            switch res {
+            case .success(let formatted):
+                activeActionResult = InlineActionResult(
+                    itemID: target.id,
+                    actionKind: .formatJSON,
+                    text: formatted,
+                    originalText: target.plainText,
+                    badge: L10n.tr("action.diff_json_formatted", lang: settings.appLanguage)
+                )
+                HapticHelper.feedback()
+            case .failure(let err):
+                activeActionResult = InlineActionResult(
+                    itemID: target.id,
+                    actionKind: .formatJSON,
+                    text: "",
+                    originalText: target.plainText,
+                    errorMessage: err.localizedDescription
+                )
+                HapticHelper.generic()
+            }
+
+        case .translate:
+            let targetLang = targetLanguage ?? (settings.appLanguage == .en ? "en" : "zh-Hans")
+            let langDisplayName = targetLang == "en" ? "English" : "简体中文"
+
+            guard ai.isConfigured else {
+                activeActionResult = InlineActionResult(
+                    itemID: target.id,
+                    actionKind: .translate,
+                    text: "",
+                    originalText: target.plainText,
+                    errorMessage: L10n.tr("action.need_ai_config", lang: settings.appLanguage),
+                    targetLanguage: targetLang
+                )
+                HapticHelper.generic()
+                return
+            }
+
+            activeActionResult = InlineActionResult(
+                itemID: target.id,
+                actionKind: .translate,
+                text: "",
+                originalText: target.plainText,
+                badge: langDisplayName,
+                isStreaming: true,
+                targetLanguage: targetLang
+            )
+
+            let prompt = "请将以下内容翻译为\(langDisplayName)。直接输出纯译文，不要包含任何解释、说明或引言：\n\n\(String(target.plainText.prefix(8000)))"
+
+            actionTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    for try await delta in self.ai.stream(prompt: prompt) {
+                        try Task.checkCancellation()
+                        guard self.activeActionResult?.itemID == target.id else { return }
+                        self.activeActionResult?.text += delta
+                    }
+                    guard self.activeActionResult?.itemID == target.id else { return }
+                    self.activeActionResult?.isStreaming = false
+                    HapticHelper.feedback()
+                } catch {
+                    guard !Task.isCancelled, self.activeActionResult?.itemID == target.id else { return }
+                    self.activeActionResult?.isStreaming = false
+                    self.activeActionResult?.errorMessage = "翻译失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    public func cancelAction() {
+        actionTask?.cancel()
+        actionTask = nil
+        if activeActionResult?.isStreaming == true {
+            activeActionResult = nil
+        }
+    }
+
+    public func retryAction() {
+        guard let cur = activeActionResult, let item = selectedItem, cur.itemID == item.id else { return }
+        executeAction(cur.actionKind, on: item, targetLanguage: cur.targetLanguage)
+    }
+
+    public func toggleActionResultOriginal() {
+        activeActionResult?.showOriginal.toggle()
+        HapticHelper.alignment()
+    }
+
+    public func dismissActionResult() {
+        cancelAction()
+        activeActionResult = nil
+        HapticHelper.alignment()
+    }
+
+    public func pasteActionResult() {
+        guard let res = activeActionResult, !res.text.isEmpty else { return }
+        pasteFieldText(res.text)
+    }
+
+    public func copyActionResult() {
+        guard let res = activeActionResult, !res.text.isEmpty else { return }
+        copyFieldText(res.text)
     }
 
     public func togglePin(_ item: ClipItem? = nil) {
@@ -734,6 +923,8 @@ public final class PanelViewModel: ObservableObject {
         closeRenameOverlay()
         showConfirmClear = false
         previewItem = nil
+        cancelAction()
+        activeActionResult = nil
     }
 
     // MARK: - AI 侧边栏与问答联动

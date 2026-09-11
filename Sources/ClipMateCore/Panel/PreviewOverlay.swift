@@ -28,6 +28,25 @@ struct PreviewOverlay: View {
                     if !fields.isEmpty {
                         extractedFieldsBar(fields)
                     }
+                    if let result = viewModel.activeActionResult, result.itemID == item.id {
+                        InlineActionResultCard(
+                            result: result,
+                            theme: viewModel.settings.appTheme,
+                            language: viewModel.settings.appLanguage,
+                            onPaste: {
+                                viewModel.pasteActionResult()
+                                viewModel.previewItem = nil
+                            },
+                            onCopy: { viewModel.copyActionResult() },
+                            onToggleOriginal: { viewModel.toggleActionResultOriginal() },
+                            onDismiss: { viewModel.dismissActionResult() },
+                            onCancel: { viewModel.cancelAction() },
+                            onRetry: { viewModel.retryAction() },
+                            onChangeLanguage: { viewModel.executeAction(.translate, on: item, targetLanguage: $0) }
+                        )
+                    } else if let rec = viewModel.recommendedAction(for: item) {
+                        previewRecommendedActionButton(rec, item: item)
+                    }
                     metaGrid(item)
                     footer(item)
                 }
@@ -740,6 +759,33 @@ struct PreviewOverlay: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func previewRecommendedActionButton(_ rec: RecommendedAction, item: ClipItem) -> some View {
+        Button {
+            viewModel.executeAction(rec.kind, on: item)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9))
+                Text(rec.title)
+                    .font(.system(size: 10.5, weight: .semibold))
+                if let badge = rec.badge {
+                    Text(badge)
+                        .font(.system(size: 9))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1))
+            .foregroundStyle(Color.accentColor)
+        }
+        .buttonStyle(.plain)
     }
 }
 

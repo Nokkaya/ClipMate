@@ -1745,6 +1745,122 @@ runner.run("Phase 2 - 字段快捷区交互（Field Shortcuts & Keyboard Actions
     runner.expectEqual(vm.selectedFieldIndex, nil, "再次向左移动退出字段焦点")
 }
 
+runner.run("Phase 3 - 修复异常断行算法与智能推荐（Broken Line Breaks Fix）") {
+    let pdfText = "这是从 PDF 复制过来的普通段落，\n因为页面边距被自动拆成了多行，\n现在重新拼接为一个完整段落。\n\n这是第二段内容，\n保留了正常的段落边界。"
+    let fixed = ContentActionEngine.fixLineBreaks(pdfText)
+    runner.expectTrue(!fixed.contains("普通段落，\n因为"), "行内换行被修复")
+    runner.expectTrue(fixed.contains("这是从 PDF 复制过来的普通段落，因为页面边距被自动拆成了多行，现在重新拼接为一个完整段落。"), "中文无空格自然拼接")
+    runner.expectTrue(fixed.contains("\n\n这是第二段内容，保留了正常的段落边界。"), "保留段落边界双换行")
+
+    let enText = "This is a multi-\nplatform application that runs on\nmacOS seamlessly."
+    let enFixed = ContentActionEngine.fixLineBreaks(enText)
+    runner.expectTrue(enFixed.contains("multiplatform"), "英文跨行连字符自动拼接成完整词")
+    runner.expectTrue(enFixed.contains("runs on macOS"), "单词之间保持单个空格")
+
+    // 推荐逻辑校验：普通段落推荐修复断行
+    let rec = ContentActionEngine.recommendAction(for: pdfText, kind: .text, tags: [], appLanguage: .zhHans)
+    runner.expectEqual(rec?.kind, .fixLineBreaks, "推荐修复断行动作")
+
+    // 代码和表格不推荐修复断行
+    let codeText = "func test() {\n    let a = 1\n    let b = 2\n    return a + b\n}"
+    let codeRec = ContentActionEngine.recommendAction(for: codeText, kind: .text, tags: ["代码"], appLanguage: .zhHans)
+    runner.expectTrue(codeRec?.kind != .fixLineBreaks, "代码不推荐修复断行")
+}
+
+runner.run("Phase 3 - 名单精确去重与统计（List Deduplication）") {
+    let listText = "张三\n李四\n王五\n张三\n赵六\n李四\n王五"
+    let (deduped, removed) = ContentActionEngine.deduplicateList(listText)
+    runner.expectEqual(removed, 3, "精确统计删除 3 条重复项")
+    runner.expectEqual(deduped, "张三\n李四\n王五\n赵六", "保持首次出现的顺序")
+
+    let rec = ContentActionEngine.recommendAction(for: listText, kind: .text, tags: [], appLanguage: .zhHans)
+    runner.expectEqual(rec?.kind, .deduplicateList, "推荐名单去重动作")
+    runner.expectTrue(rec?.badge?.contains("3") == true, "Badge 标明重复条数")
+}
+
+runner.run("Phase 3 - JSON 格式化与语法诊断（JSON Formatting & Diagnostic）") {
+    let compactJSON = "{\"name\":\"Alice\",\"age\":30,\"city\":\"Beijing\"}"
+    let rec = ContentActionEngine.recommendAction(for: compactJSON, kind: .text, tags: ["JSON"], appLanguage: .zhHans)
+    runner.expectEqual(rec?.kind, .formatJSON, "紧凑 JSON 推荐格式化")
+
+    let res = ContentActionEngine.formatJSON(compactJSON)
+    switch res {
+    case .success(let formatted):
+        runner.expectTrue(formatted.contains("\n"), "成功格式化为多行缩进")
+        runner.expectTrue(formatted.contains("\"name\" : \"Alice\"") || formatted.contains("\"name\": \"Alice\""), "保留字段名与值")
+    case .failure(let err):
+        runner.expectTrue(false, "格式化合法 JSON 不应失败: \(err)")
+    }
+
+    // 语法错误 JSON 测试
+    let invalidJSON = "{\"name\": \"Alice\", \"age\": }"
+    let invalidRes = ContentActionEngine.formatJSON(invalidJSON)
+    switch invalidRes {
+    case .success:
+        runner.expectTrue(false, "非法 JSON 不应格式化成功")
+    case .failure(let err):
+        runner.expectTrue(err.localizedDescription.contains("JSON 语法错误"), "明确给出语法诊断原因，不瞎猜")
+    }
+}
+
+runner.run("Phase 3 - 离线语言识别与快捷翻译推荐（NaturalLanguage Translation）") {
+    let enParagraph = "Clipboard managers can greatly improve daily productivity by saving copied history and making information instantly accessible."
+    let rec = ContentActionEngine.recommendAction(for: enParagraph, kind: .text, tags: [], appLanguage: .zhHans)
+    runner.expectEqual(rec?.kind, .translate, "中文系统下遇到英文段落推荐翻译")
+    runner.expectEqual(rec?.targetLanguage, "zh-Hans", "默认译为当前界面语言")
+
+    let zhParagraph = "这是一个用于测试剪贴板管理工具自然语言识别与翻译推荐的段落。"
+    let recEn = ContentActionEngine.recommendAction(for: zhParagraph, kind: .text, tags: [], appLanguage: .en)
+    runner.expectEqual(recEn?.kind, .translate, "英文系统下遇到中文段落推荐翻译")
+    runner.expectEqual(recEn?.targetLanguage, "en", "默认译为英文")
+}
+
+runner.run("Phase 3 - 就地结果状态生命周期与原文保护（Inline Action Result Lifecycle & Original Protection）") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let listText = "苹果\n香蕉\n苹果\n梨\n香蕉"
+    let captured = try store.capture(kind: .text, plainText: listText, sourceBundle: "com.test", sourceName: "Test", tags: [])
+    let item1 = captured.item
+
+    let item2 = try store.capture(kind: .text, plainText: "另一条普通文本", sourceBundle: "com.test", sourceName: "Test", tags: []).item
+
+    let settings = AppSettings()
+    let monitor = ClipboardMonitor(settings: settings, store: store)
+    let front = FrontAppTracker()
+    let ai = AIService(settings: settings)
+    let vm = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: front, ai: ai)
+
+    vm.selectOnly(item: item1)
+    runner.expectEqual(vm.selectedID, item1.id, "选中 item1")
+
+    // 执行去重动作
+    vm.executeAction(.deduplicateList, on: item1)
+    runner.expectTrue(vm.activeActionResult != nil, "生成就地结果")
+    runner.expectEqual(vm.activeActionResult?.itemID, item1.id, "结果绑定 item1 ID")
+    runner.expectEqual(vm.activeActionResult?.text, "苹果\n香蕉\n梨", "结果内容正确")
+    runner.expectEqual(vm.activeActionResult?.originalText, listText, "原样记录原文")
+
+    // 原文比对切换
+    runner.expectFalse(vm.activeActionResult?.showOriginal == true, "默认显示处理结果")
+    vm.toggleActionResultOriginal()
+    runner.expectTrue(vm.activeActionResult?.showOriginal == true, "切换为查看原文")
+    vm.toggleActionResultOriginal()
+    runner.expectFalse(vm.activeActionResult?.showOriginal == true, "切回处理结果")
+
+    // 复制处理结果
+    vm.copyActionResult()
+    runner.expectEqual(NSPasteboard.general.string(forType: .string), "苹果\n香蕉\n梨", "复制就地处理结果")
+
+    // 验证原始数据库中的条目完全未被污染篡改
+    let rawStored = store.item(id: item1.id)
+    runner.expectEqual(rawStored?.plainText, listText, "原始数据库历史条目完好保留，未被覆盖")
+
+    // 切换选中条目：严格隔离，结果清空不串味
+    vm.selectOnly(item: item2)
+    runner.expectTrue(vm.activeActionResult == nil, "切换条目后自动清理非当前条目的就地结果，杜绝串扰")
+}
+
 print("----")
 
 

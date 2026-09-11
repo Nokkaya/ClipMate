@@ -42,6 +42,18 @@ public struct ClipRowView: View, Equatable {
     public var onPasteField: ((ExtractedField) -> Void)? = nil
     public var onCopyField: ((ExtractedField) -> Void)? = nil
     public var onCopyOCR: (() -> Void)? = nil
+
+    public var recommendedAction: RecommendedAction? = nil
+    public var activeActionResult: InlineActionResult? = nil
+    public var onExecuteAction: ((ContentActionKind) -> Void)? = nil
+    public var onCancelAction: (() -> Void)? = nil
+    public var onRetryAction: (() -> Void)? = nil
+    public var onToggleOriginal: (() -> Void)? = nil
+    public var onDismissAction: (() -> Void)? = nil
+    public var onPasteActionResult: (() -> Void)? = nil
+    public var onCopyActionResult: (() -> Void)? = nil
+    public var onChangeTargetLanguage: ((String) -> Void)? = nil
+
     @State private var hovered = false
 
     public init(item: ClipItem, selected: Bool, multiSelected: Bool = false,
@@ -54,7 +66,17 @@ public struct ClipRowView: View, Equatable {
                 onToggleExpand: (() -> Void)? = nil,
                 onPasteField: ((ExtractedField) -> Void)? = nil,
                 onCopyField: ((ExtractedField) -> Void)? = nil,
-                onCopyOCR: (() -> Void)? = nil) {
+                onCopyOCR: (() -> Void)? = nil,
+                recommendedAction: RecommendedAction? = nil,
+                activeActionResult: InlineActionResult? = nil,
+                onExecuteAction: ((ContentActionKind) -> Void)? = nil,
+                onCancelAction: (() -> Void)? = nil,
+                onRetryAction: (() -> Void)? = nil,
+                onToggleOriginal: (() -> Void)? = nil,
+                onDismissAction: (() -> Void)? = nil,
+                onPasteActionResult: (() -> Void)? = nil,
+                onCopyActionResult: (() -> Void)? = nil,
+                onChangeTargetLanguage: ((String) -> Void)? = nil) {
         self.item = item
         self.selected = selected
         self.multiSelected = multiSelected
@@ -69,6 +91,16 @@ public struct ClipRowView: View, Equatable {
         self.onPasteField = onPasteField
         self.onCopyField = onCopyField
         self.onCopyOCR = onCopyOCR
+        self.recommendedAction = recommendedAction
+        self.activeActionResult = activeActionResult
+        self.onExecuteAction = onExecuteAction
+        self.onCancelAction = onCancelAction
+        self.onRetryAction = onRetryAction
+        self.onToggleOriginal = onToggleOriginal
+        self.onDismissAction = onDismissAction
+        self.onPasteActionResult = onPasteActionResult
+        self.onCopyActionResult = onCopyActionResult
+        self.onChangeTargetLanguage = onChangeTargetLanguage
     }
 
     public static func == (lhs: ClipRowView, rhs: ClipRowView) -> Bool {
@@ -87,7 +119,9 @@ public struct ClipRowView: View, Equatable {
         lhs.thumbnail === rhs.thumbnail &&
         lhs.fields == rhs.fields &&
         lhs.selectedFieldIndex == rhs.selectedFieldIndex &&
-        lhs.isExpanded == rhs.isExpanded
+        lhs.isExpanded == rhs.isExpanded &&
+        lhs.recommendedAction == rhs.recommendedAction &&
+        lhs.activeActionResult == rhs.activeActionResult
     }
 
     public var body: some View {
@@ -189,6 +223,25 @@ public struct ClipRowView: View, Equatable {
 
                 if selected && !fields.isEmpty {
                     fieldSection
+                }
+
+                if selected {
+                    if let result = activeActionResult, result.itemID == item.id {
+                        InlineActionResultCard(
+                            result: result,
+                            theme: theme,
+                            language: language,
+                            onPaste: { onPasteActionResult?() },
+                            onCopy: { onCopyActionResult?() },
+                            onToggleOriginal: { onToggleOriginal?() },
+                            onDismiss: { onDismissAction?() },
+                            onCancel: { onCancelAction?() },
+                            onRetry: { onRetryAction?() },
+                            onChangeLanguage: { onChangeTargetLanguage?($0) }
+                        )
+                    } else if let rec = recommendedAction {
+                        recommendedActionSection(rec)
+                    }
                 }
             }
             Spacer(minLength: 4)
@@ -322,6 +375,40 @@ public struct ClipRowView: View, Equatable {
         }
         .padding(.top, 2)
     }
+
+    @ViewBuilder
+    private func recommendedActionSection(_ rec: RecommendedAction) -> some View {
+        Button {
+            onExecuteAction?(rec.kind)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 8.5))
+                Text(rec.title)
+                    .font(.system(size: 9.5, weight: .semibold))
+                if let badge = rec.badge {
+                    Text(badge)
+                        .font(.system(size: 8.5))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(theme.accent.opacity(0.18)))
+                }
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(theme.accent.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(theme.accent.opacity(0.32), lineWidth: 1)
+            )
+            .foregroundStyle(theme.accent)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+    }
 }
 
 /// 局部字段胶囊视图
@@ -384,5 +471,197 @@ struct FieldPillView: View {
         )
         .onHover { hovered = $0 }
         .help(field.value)
+    }
+}
+
+/// 就地动作处理结果卡片（支持结果滚动预览、对比原文、复制与直接粘贴、取消与重试）
+struct InlineActionResultCard: View {
+    let result: InlineActionResult
+    let theme: AppTheme
+    let language: AppLanguage
+    let onPaste: () -> Void
+    let onCopy: () -> Void
+    let onToggleOriginal: () -> Void
+    let onDismiss: () -> Void
+    let onCancel: () -> Void
+    let onRetry: () -> Void
+    let onChangeLanguage: ((String) -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // 顶栏：图标 + 动作名 + 状态/差异 Badge + 语言切换 + 关闭
+            HStack(spacing: 5) {
+                Image(systemName: result.actionKind.icon)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(theme.accent)
+
+                Text(headerTitle)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.accent)
+
+                if let badge = result.badge {
+                    Text(badge)
+                        .font(.system(size: 8.5))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(theme.accent.opacity(0.15)))
+                        .foregroundStyle(theme.accent)
+                }
+
+                if result.actionKind == .translate {
+                    Menu {
+                        Button("简体中文") { onChangeLanguage?("zh-Hans") }
+                        Button("English") { onChangeLanguage?("en") }
+                        Button("日本語") { onChangeLanguage?("ja") }
+                        Button("한국어") { onChangeLanguage?("ko") }
+                        Button("Français") { onChangeLanguage?("fr") }
+                        Button("Deutsch") { onChangeLanguage?("de") }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text(result.targetLanguage == "en" ? "EN" : "中")
+                                .font(.system(size: 8.5, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 6))
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.06)))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                }
+
+                Spacer()
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(L10n.tr("action.close", lang: language))
+            }
+
+            // 内容展示区
+            if let error = result.errorMessage {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.red)
+                    Text(error)
+                        .font(.system(size: 10))
+                        .lineLimit(2)
+                        .foregroundStyle(Color.red)
+                    Spacer()
+                    Button(action: onRetry) {
+                        Text(L10n.tr("action.retry", lang: language))
+                            .font(.system(size: 9, weight: .medium))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(RoundedRectangle(cornerRadius: 3).fill(Color.red.opacity(0.15)))
+                            .foregroundStyle(Color.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(5)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.red.opacity(0.06)))
+            } else {
+                let displayText = result.showOriginal ? result.originalText : result.text
+                ScrollView {
+                    Text(displayText.isEmpty && result.isStreaming ? L10n.tr("action.processing", lang: language) : displayText)
+                        .font(result.actionKind == .formatJSON ? .system(size: 10, design: .monospaced) : .system(size: 10.5))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundStyle(displayText.isEmpty ? Color.secondary : Color.primary)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 75)
+                .modernScrollbar()
+                .padding(5)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.04)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                )
+            }
+
+            // 底栏操作按钮：直接粘贴、仅复制、比对、取消
+            HStack(spacing: 5) {
+                if result.isStreaming {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 12, height: 12)
+                    Text(L10n.tr("action.processing", lang: language))
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.secondary)
+                    Spacer()
+                    Button(action: onCancel) {
+                        Text(L10n.tr("action.cancel", lang: language))
+                            .font(.system(size: 9, weight: .medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2.5)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                } else if result.errorMessage == nil {
+                    Button(action: onPaste) {
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.right.doc.on.clipboard")
+                                .font(.system(size: 8))
+                            Text(L10n.tr("action.paste", lang: language))
+                                .font(.system(size: 9, weight: .medium))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(theme.accent))
+                        .foregroundStyle(Color.white)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onCopy) {
+                        HStack(spacing: 2) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 8))
+                            Text(L10n.tr("action.copy", lang: language))
+                                .font(.system(size: 9, weight: .medium))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+                        .foregroundStyle(Color.primary)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button(action: onToggleOriginal) {
+                        Text(result.showOriginal ? L10n.tr("action.view_result", lang: language) : L10n.tr("action.view_original", lang: language))
+                            .font(.system(size: 8.5))
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(7)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(theme.accent.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(theme.accent.opacity(0.25), lineWidth: 1)
+        )
+        .padding(.top, 2)
+    }
+
+    private var headerTitle: String {
+        switch result.actionKind {
+        case .fixLineBreaks: return L10n.tr("action.fix_line_breaks", lang: language)
+        case .deduplicateList: return L10n.tr("action.deduplicate_list", lang: language)
+        case .formatJSON: return L10n.tr("action.format_json", lang: language)
+        case .translate: return L10n.tr("action.translate", lang: language)
+        }
     }
 }
