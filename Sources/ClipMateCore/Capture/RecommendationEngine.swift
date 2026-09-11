@@ -37,12 +37,14 @@ public struct UsageRecord: Codable, Equatable, Sendable {
     public let itemID: Int64
     public let appBundle: String?
     public let fieldKind: String?
+    public let fieldID: String?
     public let timestamp: Date
 
-    public init(itemID: Int64, appBundle: String?, fieldKind: String? = nil, timestamp: Date = Date()) {
+    public init(itemID: Int64, appBundle: String?, fieldKind: String? = nil, fieldID: String? = nil, timestamp: Date = Date()) {
         self.itemID = itemID
         self.appBundle = appBundle
         self.fieldKind = fieldKind
+        self.fieldID = fieldID
         self.timestamp = timestamp
     }
 }
@@ -68,6 +70,7 @@ public struct RecommendationLearningStore: Codable, Equatable, Sendable {
     public var sequenceTransitions: [SequenceTransition] = []
     public var ignoredItemIDs: Set<Int64> = []
     public var actionUsageCounts: [String: Int] = [:]
+    public var mutedActionKinds: Set<String> = []
     public var lastUsedItemID: Int64? = nil
     public var lastUsedTimestamp: Date? = nil
 
@@ -93,6 +96,7 @@ public struct RecommendationLearningStore: Codable, Equatable, Sendable {
             itemID: itemID,
             appBundle: appBundle,
             fieldKind: field?.kind.rawValue,
+            fieldID: field?.id,
             timestamp: now
         )
         usageRecords.append(record)
@@ -115,12 +119,23 @@ public struct RecommendationLearningStore: Codable, Equatable, Sendable {
         ignoredItemIDs.insert(id)
     }
 
-    /// 清空所有学习记录
+    /// 减少/屏蔽某类动作推荐
+    public mutating func muteAction(_ kind: ContentActionKind) {
+        mutedActionKinds.insert(kind.rawValue)
+    }
+
+    /// 恢复某类动作推荐
+    public mutating func unmuteAction(_ kind: ContentActionKind) {
+        mutedActionKinds.remove(kind.rawValue)
+    }
+
+    /// 清空所有学习记录与偏好
     public mutating func clear() {
         usageRecords.removeAll()
         sequenceTransitions.removeAll()
         ignoredItemIDs.removeAll()
         actionUsageCounts.removeAll()
+        mutedActionKinds.removeAll()
         lastUsedItemID = nil
         lastUsedTimestamp = nil
     }
@@ -153,14 +168,21 @@ public enum RecommendationEngine {
         // 策略 1：同份资料继续取用（用户在 15 分钟内取用了某个资料的部分字段，优先推荐剩余未取用字段）
         let fifteenMinsAgo = now.addingTimeInterval(-900)
         let recentFieldRecords = learningStore.usageRecords.filter {
-            $0.timestamp >= fifteenMinsAgo && $0.fieldKind != nil
+            $0.timestamp >= fifteenMinsAgo && ($0.fieldID != nil || $0.fieldKind != nil)
         }
 
         if let lastFieldRecord = recentFieldRecords.last,
            let baseItem = itemMap[lastFieldRecord.itemID] {
             let allFields = ContentExtractor.extractFields(from: baseItem)
-            let usedKinds = Set(recentFieldRecords.filter { $0.itemID == baseItem.id }.compactMap(\.fieldKind))
-            let unused = allFields.filter { !usedKinds.contains($0.kind.rawValue) }
+            let usedFieldIDs = Set(recentFieldRecords.filter { $0.itemID == baseItem.id }.compactMap(\.fieldID))
+            let unused: [ExtractedField] = {
+                if !usedFieldIDs.isEmpty {
+                    return allFields.filter { !usedFieldIDs.contains($0.id) }
+                } else {
+                    let usedKinds = Set(recentFieldRecords.filter { $0.itemID == baseItem.id }.compactMap(\.fieldKind))
+                    return allFields.filter { !usedKinds.contains($0.kind.rawValue) }
+                }
+            }()
 
             if !unused.isEmpty {
                 let reasonText = isZh ? "同份资料" : "Same Source"

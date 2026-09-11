@@ -432,7 +432,8 @@ struct ClipList: View {
                             onDismissAction: { viewModel.dismissActionResult() },
                             onPasteActionResult: { viewModel.pasteActionResult() },
                             onCopyActionResult: { viewModel.copyActionResult() },
-                            onChangeTargetLanguage: { lang in viewModel.executeAction(.translate, on: item, targetLanguage: lang) }
+                            onChangeTargetLanguage: { lang in viewModel.executeAction(.translate, on: item, targetLanguage: lang) },
+                            onMuteAction: { action in viewModel.muteAction(action) }
                         )
                         .equatable()
 

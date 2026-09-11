@@ -53,11 +53,11 @@ public final class PanelViewModel: ObservableObject {
     @Published public var selectedFieldIndex: Int? = nil
     /// 展开全部字段的条目 ID 集合
     @Published public var expandedFieldItemIDs: Set<Int64> = []
-    private var fieldsCache: [Int64: [ExtractedField]] = [:]
+    private var fieldsCache: [String: [ExtractedField]] = [:]
 
     /// 就地动作处理结果（不覆盖原文，支持对比、复制、粘贴）
     @Published public var activeActionResult: InlineActionResult? = nil
-    private var actionCache: [Int64: RecommendedAction?] = [:]
+    private var actionCache: [String: RecommendedAction?] = [:]
     private var actionTask: Task<Void, Never>?
 
     /// 智能内容推荐（最多 3 条，独立推荐区展示，不影响普通历史顺序与数字快捷键）
@@ -270,18 +270,28 @@ public final class PanelViewModel: ObservableObject {
         refreshRecommendations()
     }
 
+    private func itemCacheKey(for item: ClipItem) -> String {
+        "\(item.id):\(item.plainText.hashValue):\(item.tags.joined(separator: ","))"
+    }
+
+    public func invalidateItemCaches(for id: Int64) {
+        thumbCache.removeObject(forKey: NSNumber(value: id))
+        fieldsCache = fieldsCache.filter { !$0.key.hasPrefix("\(id):") }
+        actionCache = actionCache.filter { !$0.key.hasPrefix("\(id):") }
+        if activeActionResult?.itemID == id {
+            cancelAction()
+            activeActionResult = nil
+        }
+    }
+
     public func handleCaptured(_ item: ClipItem) {
-        thumbCache.removeObject(forKey: NSNumber(value: item.id))
-        fieldsCache.removeValue(forKey: item.id)
-        actionCache.removeValue(forKey: item.id)
+        invalidateItemCaches(for: item.id)
         reload()
     }
 
     /// 后台异步识别（OCR/智能标题/链接元数据等）完成后就地更新单条，不重排列表、不改变选中项与按钮位置
     public func handleItemUpdated(_ item: ClipItem) {
-        thumbCache.removeObject(forKey: NSNumber(value: item.id))
-        fieldsCache.removeValue(forKey: item.id)
-        actionCache.removeValue(forKey: item.id)
+        invalidateItemCaches(for: item.id)
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index] = item
             if selectedID == item.id {
@@ -418,6 +428,9 @@ public final class PanelViewModel: ObservableObject {
         case .pasteFailed:
             title = L10n.tr("toast.paste_fallback.title", lang: settings.appLanguage)
             subtitle = L10n.tr("toast.paste_fallback.manual_hint", lang: settings.appLanguage)
+        case .newCopyDetected:
+            title = L10n.tr("toast.paste_queue_aborted", lang: settings.appLanguage)
+            subtitle = L10n.tr("toast.paste_queue_aborted_hint", lang: settings.appLanguage)
         }
         ToastHUD.shared.show(
             icon: "exclamationmark.triangle.fill",
@@ -442,9 +455,10 @@ public final class PanelViewModel: ObservableObject {
     // MARK: - 局部字段快捷取用
 
     public func fields(for item: ClipItem) -> [ExtractedField] {
-        if let cached = fieldsCache[item.id] { return cached }
+        let key = itemCacheKey(for: item)
+        if let cached = fieldsCache[key] { return cached }
         let extracted = ContentExtractor.extractFields(from: item)
-        fieldsCache[item.id] = extracted
+        fieldsCache[key] = extracted
         return extracted
     }
 
@@ -525,15 +539,35 @@ public final class PanelViewModel: ObservableObject {
     // MARK: - 第三阶段：按内容提供一键处理
 
     public func recommendedAction(for item: ClipItem) -> RecommendedAction? {
-        if let cached = actionCache[item.id] { return cached }
+        let key = itemCacheKey(for: item)
+        if let cached = actionCache[key] { return cached }
         let action = ContentActionEngine.recommendAction(
             for: item.plainText,
             kind: item.kind,
             tags: item.tags,
-            appLanguage: settings.appLanguage
+            appLanguage: settings.appLanguage,
+            actionUsageCounts: settings.recommendationStore.actionUsageCounts,
+            mutedActionKinds: settings.recommendationStore.mutedActionKinds
         )
-        actionCache[item.id] = action
+        actionCache[key] = action
         return action
+    }
+
+    /// 减少/屏蔽某类动作推荐
+    public func muteAction(_ kind: ContentActionKind) {
+        settings.recommendationStore.muteAction(kind)
+        if activeActionResult?.actionKind == kind {
+            cancelAction()
+            activeActionResult = nil
+        }
+        actionCache.removeAll()
+        HapticHelper.alignment()
+    }
+
+    /// 恢复某类动作推荐
+    public func unmuteAction(_ kind: ContentActionKind) {
+        settings.recommendationStore.unmuteAction(kind)
+        actionCache.removeAll()
     }
 
     public func executeAction(_ actionKind: ContentActionKind, on item: ClipItem? = nil, targetLanguage: String? = nil) {
@@ -591,8 +625,27 @@ public final class PanelViewModel: ObservableObject {
             }
 
         case .translate:
-            let targetLang = targetLanguage ?? (settings.appLanguage == .en ? "en" : "zh-Hans")
-            let langDisplayName = targetLang == "en" ? "English" : "简体中文"
+            // CM-08: 统一目标语言代码解析与对应语言名称映射
+            let defaultTarget: String = {
+                if let recLang = recommendedAction(for: target)?.targetLanguage {
+                    return recLang
+                }
+                return settings.appLanguage == .en ? "en" : "zh-Hans"
+            }()
+            let targetLang = targetLanguage ?? defaultTarget
+            let isZhUI = (settings.appLanguage == .zhHans || (settings.appLanguage == .system && Locale.preferredLanguages.first?.hasPrefix("zh") == true))
+            let promptLangName = ContentActionEngine.languageName(for: targetLang, isZh: true)
+            let badgeLangName = ContentActionEngine.languageName(for: targetLang, isZh: isZhUI)
+
+            // CM-09: 长文本（超过 8000 字符）翻译时明确标注处理范围，避免静默截断误导用户
+            let isTruncated = target.plainText.count > 8000
+            let badgeText: String = {
+                if isTruncated {
+                    return isZhUI ? "\(badgeLangName) · 仅前 8,000 字" : "\(badgeLangName) · First 8,000 chars"
+                } else {
+                    return badgeLangName
+                }
+            }()
 
             guard ai.isConfigured else {
                 activeActionResult = InlineActionResult(
@@ -600,6 +653,7 @@ public final class PanelViewModel: ObservableObject {
                     actionKind: .translate,
                     text: "",
                     originalText: target.plainText,
+                    badge: badgeText,
                     errorMessage: L10n.tr("action.need_ai_config", lang: settings.appLanguage),
                     targetLanguage: targetLang
                 )
@@ -612,12 +666,14 @@ public final class PanelViewModel: ObservableObject {
                 actionKind: .translate,
                 text: "",
                 originalText: target.plainText,
-                badge: langDisplayName,
+                badge: badgeText,
                 isStreaming: true,
                 targetLanguage: targetLang
             )
 
-            let prompt = "请将以下内容翻译为\(langDisplayName)。直接输出纯译文，不要包含任何解释、说明或引言：\n\n\(String(target.plainText.prefix(8000)))"
+            let promptBody = String(target.plainText.prefix(8000))
+            let rangeNotice = isTruncated ? "（注：输入文本较长，仅翻译前 8,000 字符）\n\n" : ""
+            let prompt = "请将以下内容翻译为\(promptLangName)。\(rangeNotice)直接输出纯译文，不要包含任何解释、说明或引言：\n\n\(promptBody)"
 
             actionTask = Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -734,6 +790,7 @@ public final class PanelViewModel: ObservableObject {
     public func saveEdit() {
         guard let target = selectedItem else { return }
         try? store.updateText(target.id, editText)
+        invalidateItemCaches(for: target.id)
         showEditOverlay = false
         reload()
         copy(item: store.item(id: target.id) ?? target)

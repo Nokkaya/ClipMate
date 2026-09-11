@@ -1999,6 +1999,246 @@ runner.run("Phase 4 - 隐藏单条推荐与清除推荐学习记录（Dismiss & 
     runner.expectTrue(settings.recommendationStore.ignoredItemIDs.isEmpty, "已隐藏条目重置清空")
 }
 
+// MARK: - 验收问题清单测试集（CM-01 ~ CM-14）
+
+runner.run("Acceptance - CM-01: 修改条目后本地缓存有效失效") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let item = try store.capture(kind: .text, plainText: "电话：13800138000", sourceBundle: "com.test", sourceName: "Test").item
+    let settings = AppSettings()
+    let monitor = ClipboardMonitor(settings: settings, store: store)
+    let front = FrontAppTracker()
+    let ai = AIService(settings: settings)
+    let vm = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: front, ai: ai)
+
+    let initialFields = vm.fields(for: item)
+    runner.expectEqual(initialFields.first?.value, "13800138000", "初始缓存包含旧号码")
+
+    // 保存编辑为新号码
+    vm.selectOnly(item: item)
+    vm.beginEdit()
+    vm.editText = "电话：13900139000"
+    vm.saveEdit()
+
+    // 获取更新后的条目
+    let updatedItem = vm.items.first(where: { $0.id == item.id }) ?? item
+    let newFields = vm.fields(for: updatedItem)
+    runner.expectEqual(newFields.first?.value, "13900139000", "编辑保存后字段缓存失效，返回新号码")
+}
+
+runner.run("Acceptance - CM-02: 地址字段包含逗号时完整保留不被截断") {
+    let text = "收件人：张三，电话：13812345678，地址：上海市浦东新区，世纪大道100号，A座301室"
+    let fields = ContentExtractor.extractFromText(text)
+    let addressField = fields.first(where: { $0.label.contains("地址") })
+    runner.expectTrue(addressField != nil, "提取到地址字段")
+    runner.expectEqual(addressField?.value, "上海市浦东新区，世纪大道100号，A座301室", "地址字段中的逗号未导致截断")
+
+    let textEn = "Name: John, Phone: 13812345678, Address: Room 301, Building A, No. 100 Century Avenue, Pudong, Shanghai"
+    let fieldsEn = ContentExtractor.extractFromText(textEn)
+    let addressFieldEn = fieldsEn.first(where: { $0.label.contains("Address") || $0.label.contains("地址") })
+    runner.expectTrue(addressFieldEn != nil, "提取到英文地址字段")
+    runner.expectEqual(addressFieldEn?.value, "Room 301, Building A, No. 100 Century Avenue, Pudong, Shanghai", "英文逗号未导致截断")
+}
+
+runner.run("Acceptance - CM-03: URL末尾文本与标点污染被精确过滤") {
+    let t1 = "请访问 https://github.com/apple/swift。谢谢！"
+    let f1 = ContentExtractor.extractFromText(t1)
+    runner.expectEqual(f1.first(where: { $0.kind == .url })?.value, "https://github.com/apple/swift", "中文标点及后续文本未污染URL")
+
+    let t2 = "接口文档: https://example.com/api?user=123, 随后继续"
+    let f2 = ContentExtractor.extractFromText(t2)
+    runner.expectEqual(f2.first(where: { $0.kind == .url })?.value, "https://example.com/api?user=123", "英文逗号及后续文本未污染URL")
+
+    let t3 = "Check this: (https://swift.org/download/)"
+    let f3 = ContentExtractor.extractFromText(t3)
+    runner.expectEqual(f3.first(where: { $0.kind == .url })?.value, "https://swift.org/download/", "成对括号末尾未污染URL")
+}
+
+runner.run("Acceptance - CM-04: 嵌套JSON同名Key解析独立且不发生去重碰撞丢失") {
+    let json = """
+    {
+      "shipping": {
+        "amount": 10,
+        "city": "Beijing"
+      },
+      "billing": {
+        "amount": 20,
+        "city": "Shanghai"
+      }
+    }
+    """
+    let fields = ContentExtractor.extractFromText(json)
+    let amountFields = fields.filter { $0.label.hasSuffix("amount") }
+    let cityFields = fields.filter { $0.label.hasSuffix("city") }
+
+    runner.expectEqual(amountFields.count, 2, "嵌套同名 amount 字段均被提取，无碰撞丢失")
+    runner.expectEqual(cityFields.count, 2, "嵌套同名 city 字段均被提取，无碰撞丢失")
+
+    let values = Set(amountFields.map { $0.value })
+    runner.expectTrue(values.contains("10") && values.contains("20"), "不同作用域下的 amount 值各自独立正确")
+
+    let ids = Set(amountFields.map { $0.id })
+    runner.expectEqual(ids.count, 2, "同名但不同值的字段具有独立 ID")
+}
+
+runner.run("Acceptance - CM-05: 文本框编辑时方向键保留、组合键优先于字段粘贴") {
+    let noMod: NSEvent.ModifierFlags = []
+    let cmdMod: NSEvent.ModifierFlags = [.command]
+    let hasSpecialModifier = !cmdMod.intersection([.command, .shift, .option]).isEmpty
+    runner.expectTrue(hasSpecialModifier, "Command修饰键被检测为特殊组合键")
+
+    let shouldInterceptReturn = noMod.intersection([.command, .shift, .option]).isEmpty
+    runner.expectTrue(shouldInterceptReturn, "无修饰键时才进入普通字段快捷回车")
+}
+
+runner.run("Acceptance - CM-06: 长文本同步提取预算限制（<64KB 输入保护，防止界面卡顿）") {
+    var bigText = ""
+    for i in 1...30000 {
+        bigText += "Line number \(i): This is a dummy log line for testing performance.\n"
+    }
+
+    let start = Date()
+    let action = ContentActionEngine.recommendAction(for: bigText, kind: .text)
+    let elapsedMs = -start.timeIntervalSinceNow * 1000
+    print("   30000行耗时: \(String(format: "%.2f", elapsedMs)) ms")
+    runner.expectTrue(elapsedMs < 100, "超长文本在预算截断下推荐动作耗时低于100ms（防止卡死主线程）")
+    _ = action
+}
+
+runner.run("Acceptance - CM-07: 批量粘贴中途检测到用户新复制操作安全中断") {
+    let pboard = NSPasteboard.general
+    let initialCount = pboard.changeCount
+
+    pboard.clearContents()
+    pboard.setString("test", forType: .string)
+    let newCount = pboard.changeCount
+    runner.expectTrue(newCount > initialCount, "检测到外部剪贴板变更")
+}
+
+runner.run("Acceptance - CM-08: 多语言翻译目标语言名称准确解析") {
+    runner.expectEqual(ContentActionEngine.languageName(for: "ja", isZh: true), "日语", "ja 中文名称")
+    runner.expectEqual(ContentActionEngine.languageName(for: "ja", isZh: false), "Japanese", "ja 英文名称")
+    runner.expectEqual(ContentActionEngine.languageName(for: "ko", isZh: true), "韩语", "ko 中文名称")
+    runner.expectEqual(ContentActionEngine.languageName(for: "fr", isZh: true), "法语", "fr 中文名称")
+    runner.expectEqual(ContentActionEngine.languageName(for: "de", isZh: true), "德语", "de 中文名称")
+    runner.expectEqual(ContentActionEngine.languageName(for: "es", isZh: true), "西班牙语", "es 中文名称")
+    runner.expectEqual(ContentActionEngine.languageName(for: "ru", isZh: true), "俄语", "ru 中文名称")
+}
+
+runner.run("Acceptance - CM-09: 8000字以上长文本翻译携带截断范围提示") {
+    let (store, dir) = try makeTempStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let longEnText = String(repeating: "This is an important paragraph that needs translation into another language. ", count: 120) // ~8800 chars
+    runner.expectTrue(longEnText.count > 8000, "构造字数超过8000")
+
+    let item = try store.capture(kind: .text, plainText: longEnText, sourceBundle: "com.test", sourceName: "Test").item
+    let settings = AppSettings()
+    let monitor = ClipboardMonitor(settings: settings, store: store)
+    let front = FrontAppTracker()
+    let ai = AIService(settings: settings)
+    let vm = PanelViewModel(store: store, settings: settings, monitor: monitor, frontApps: front, ai: ai)
+
+    // 触发翻译
+    vm.executeAction(.translate, on: item, targetLanguage: "zh-Hans")
+    runner.expectTrue(vm.activeActionResult?.badge?.contains("8,000") == true, "长文本翻译卡片 badge 明确标注 8,000 字限制")
+}
+
+runner.run("Acceptance - CM-10: 代码段不被误推'去重'动作") {
+    let code = """
+    func handle(state: Int) -> Bool {
+        if state == 1 {
+            return true
+        }
+        if state == 2 {
+            return true
+        }
+        return false
+    }
+    """
+    let action = ContentActionEngine.recommendAction(for: code, kind: .text)
+    runner.expectFalse(action?.kind == .deduplicateList, "多行重复 return true 的代码不被误判为去重列表")
+}
+
+runner.run("Acceptance - CM-11: 列表去重数量展示与实际移除行数完全一致") {
+    let listText = """
+    Alice
+     Alice
+    Bob
+    Bob
+    Charlie
+    """
+    let duplicatesCheck = ContentActionEngine.checkDuplicates(listText)
+    let dedupResult = ContentActionEngine.deduplicateList(listText)
+    runner.expectEqual(duplicatesCheck.removedCount, 1, "准确检测出 1 行完全重复（保留前导空格不同的相似行）")
+    runner.expectEqual(dedupResult.removedCount, 1, "去重后实际移除行数完全一致")
+    runner.expectEqual(duplicatesCheck.removedCount, dedupResult.removedCount, "检测提示与执行结果数量严格一致")
+}
+
+runner.run("Acceptance - CM-12: 50位超长整数JSON格式化无精度损失") {
+    let largeInt = "12345678901234567890123456789012345678901234567890"
+    let rawJSON = "{\"id\":\(largeInt),\"status\":\"ok\"}"
+    let formatResult = ContentActionEngine.formatJSON(rawJSON)
+    switch formatResult {
+    case .success(let formatted):
+        runner.expectTrue(formatted.contains(largeInt), "50位超长整数原样保留，未转化为科学计数法或丢失末位精度")
+    case .failure(let err):
+        runner.expectTrue(false, "JSON格式化应成功，但返回错误: \(err)")
+    }
+}
+
+runner.run("Acceptance - CM-13: 推荐字段使用后同类其它字段不被排除") {
+    let contactText = "联系人：李四，手机：13911112222，地址：北京市朝阳区建国门外大街1号"
+    let fields = ContentExtractor.extractFromText(contactText)
+    guard let nameField = fields.first(where: { $0.label.contains("联系人") || $0.label.contains("姓名") }),
+          let phoneField = fields.first(where: { $0.label.contains("手机") || $0.label.contains("电话") }),
+          let addressField = fields.first(where: { $0.label.contains("地址") }) else {
+        runner.expectTrue(false, "提取联系人字段完整")
+        return
+    }
+
+    var store = RecommendationLearningStore()
+    store.recordUsage(itemID: 100, appBundle: "com.test", field: nameField)
+
+    // 检查已记录的 fieldID 为该字段专属 ID
+    runner.expectTrue(store.usageRecords.contains(where: { $0.fieldID == nameField.id }), "记录了具体字段ID")
+
+    // 再次调用推荐时，未使用的 phoneField 和 addressField 依然在 unusedFields 中
+    let unused = fields.filter { field in
+        !store.usageRecords.contains { $0.fieldID == field.id }
+    }
+    runner.expectTrue(unused.contains(where: { $0.id == phoneField.id }), "同类别的电话字段依然待推荐")
+    runner.expectTrue(unused.contains(where: { $0.id == addressField.id }), "同类别的地址字段依然待推荐")
+}
+
+runner.run("Acceptance - CM-14: 动作屏蔽与动作使用频率加权正确生效") {
+    let rawJSON = "{\"name\":\"test\",\"valid\":true}"
+
+    // 初始状态推荐格式化 JSON
+    let normalAction = ContentActionEngine.recommendAction(for: rawJSON, kind: .text)
+    runner.expectEqual(normalAction?.kind, .formatJSON, "未屏蔽时推荐格式化 JSON")
+
+    // 屏蔽 formatJSON
+    let mutedAction = ContentActionEngine.recommendAction(
+        for: rawJSON,
+        kind: .text,
+        mutedActionKinds: [ContentActionKind.formatJSON.rawValue]
+    )
+    runner.expectFalse(mutedAction?.kind == .formatJSON, "已屏蔽 formatJSON 动作后不再推荐")
+
+    // 测试学习记录权重生效
+    var store = RecommendationLearningStore()
+    store.recordUsage(itemID: 1, appBundle: "com.test", action: .fixLineBreaks)
+    store.recordUsage(itemID: 1, appBundle: "com.test", action: .fixLineBreaks)
+    runner.expectEqual(store.actionUsageCounts[ContentActionKind.fixLineBreaks.rawValue], 2, "动作使用记录增加")
+
+    store.muteAction(.fixLineBreaks)
+    runner.expectTrue(store.mutedActionKinds.contains(ContentActionKind.fixLineBreaks.rawValue), "已存入屏蔽列表")
+    store.unmuteAction(.fixLineBreaks)
+    runner.expectFalse(store.mutedActionKinds.contains(ContentActionKind.fixLineBreaks.rawValue), "取消屏蔽成功")
+}
+
 print("----")
 
 

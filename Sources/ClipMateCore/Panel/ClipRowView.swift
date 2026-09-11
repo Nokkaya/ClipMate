@@ -53,6 +53,7 @@ public struct ClipRowView: View, Equatable {
     public var onPasteActionResult: (() -> Void)? = nil
     public var onCopyActionResult: (() -> Void)? = nil
     public var onChangeTargetLanguage: ((String) -> Void)? = nil
+    public var onMuteAction: ((ContentActionKind) -> Void)? = nil
 
     @State private var hovered = false
 
@@ -76,7 +77,8 @@ public struct ClipRowView: View, Equatable {
                 onDismissAction: (() -> Void)? = nil,
                 onPasteActionResult: (() -> Void)? = nil,
                 onCopyActionResult: (() -> Void)? = nil,
-                onChangeTargetLanguage: ((String) -> Void)? = nil) {
+                onChangeTargetLanguage: ((String) -> Void)? = nil,
+                onMuteAction: ((ContentActionKind) -> Void)? = nil) {
         self.item = item
         self.selected = selected
         self.multiSelected = multiSelected
@@ -101,6 +103,7 @@ public struct ClipRowView: View, Equatable {
         self.onPasteActionResult = onPasteActionResult
         self.onCopyActionResult = onCopyActionResult
         self.onChangeTargetLanguage = onChangeTargetLanguage
+        self.onMuteAction = onMuteAction
     }
 
     public static func == (lhs: ClipRowView, rhs: ClipRowView) -> Bool {
@@ -378,35 +381,57 @@ public struct ClipRowView: View, Equatable {
 
     @ViewBuilder
     private func recommendedActionSection(_ rec: RecommendedAction) -> some View {
-        Button {
-            onExecuteAction?(rec.kind)
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 8.5))
-                Text(rec.title)
-                    .font(.system(size: 9.5, weight: .semibold))
-                if let badge = rec.badge {
-                    Text(badge)
+        HStack(spacing: 3) {
+            Button {
+                onExecuteAction?(rec.kind)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
                         .font(.system(size: 8.5))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(theme.accent.opacity(0.18)))
+                    Text(rec.title)
+                        .font(.system(size: 9.5, weight: .semibold))
+                    if let badge = rec.badge {
+                        Text(badge)
+                            .font(.system(size: 8.5))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(theme.accent.opacity(0.18)))
+                    }
                 }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(theme.accent.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(theme.accent.opacity(0.32), lineWidth: 1)
+                )
+                .foregroundStyle(theme.accent)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(theme.accent.opacity(0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(theme.accent.opacity(0.32), lineWidth: 1)
-            )
-            .foregroundStyle(theme.accent)
+            .buttonStyle(.plain)
+
+            if let onMuteAction {
+                Menu {
+                    Button(role: .destructive) {
+                        onMuteAction(rec.kind)
+                    } label: {
+                        Label(L10n.tr("action.mute_action", lang: language), systemImage: "bell.slash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 8.5))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 3)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(L10n.tr("action.mute_action", lang: language))
+            }
         }
-        .buttonStyle(.plain)
         .padding(.top, 2)
     }
 }

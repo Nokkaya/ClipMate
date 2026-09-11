@@ -50,7 +50,7 @@ public enum ContentExtractor {
     )
 
     private static let urlRegex = try? NSRegularExpression(
-        pattern: #"https?://[^\s<>"'()]+"#
+        pattern: #"https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&'*+,;=%]+"#
     )
 
     // 匹配中国大陆手机号（支持 +86 前缀与空格/横杠分隔）
@@ -68,9 +68,12 @@ public enum ContentExtractor {
         pattern: #"\+[1-9]\d{0,3}[- ]?(?:\(?\d{1,4}\)?[- ]?)?\d{3,4}[- ]?\d{3,4}\b"#
     )
 
-    // 匹配结构化联系人标签行
+    // 匹配结构化联系人标签名集合
+    private static let contactLabelNames = "姓名|联系人|收件人|公司|单位|部门|职位|职务|手机|电话|座机|邮箱|邮件|地址|收货地址|微信号|微信|QQ|邮编|备注|Name|Contact|Company|Department|Title|Position|Phone|Mobile|Tel|Email|Address|WeChat|Note"
+
+    // 匹配结构化联系人标签行（字段值结束于换行符，或紧随下一合法字段标签处，完整保留地址等内部逗号）
     private static let contactLabelRegex = try? NSRegularExpression(
-        pattern: #"(?i)(?:^|[\n,，;；|]|\s)\s*(姓名|联系人|收件人|公司|单位|部门|职位|职务|手机|电话|座机|邮箱|邮件|地址|收货地址|微信号|微信|QQ|邮编|备注|Name|Contact|Company|Department|Title|Position|Phone|Mobile|Tel|Email|Address|WeChat|Note)\s*[:：]\s*([^\n,，;；|]+)"#
+        pattern: #"(?i)(?:^|[\n,，;；|]|\s)\s*(\#(contactLabelNames))\s*[:：]\s*(.+?)(?=(?:[\n,，;；|]\s*(?:\#(contactLabelNames))\s*[:：]|[\n\r]|\s*$))"#
     )
 
     // MARK: - 主入口
@@ -92,15 +95,16 @@ public enum ContentExtractor {
         let scanText = trimmed.count > 32768 ? String(trimmed.prefix(32768)) : trimmed
 
         var results: [ExtractedField] = []
-        var seenValues = Set<String>()
+        var seenFieldIDs = Set<String>()
 
         func addField(_ field: ExtractedField) {
             let normalized = field.value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty else { return }
             // 整段内容如果就等于该字段自身，则不产生多余局部取用胶囊
             if normalized == trimmed { return }
-            if !seenValues.contains(normalized) {
-                seenValues.insert(normalized)
+            // 按 field.id 去重（包含 kind, label, value），不同字段允许相同值（如两个不同的 count: 0，或 billing.amount 与 shipping.amount）
+            if !seenFieldIDs.contains(field.id) {
+                seenFieldIDs.insert(field.id)
                 results.append(field)
             }
         }
@@ -271,15 +275,27 @@ public enum ContentExtractor {
         let nsText = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
 
+        // 常见误粘连的末尾英文/半角标点字符集
+        let trailingPunctuation = CharacterSet(charactersIn: ".,;:!?)]}\"'")
+
         for match in matches {
-            let range = match.range
-            let value = nsText.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
-            fields.append(ExtractedField(label: "链接", value: value, kind: .url, sourceRange: Range(range, in: text)))
+            var rawRange = match.range
+            var rawValue = nsText.substring(with: rawRange)
+
+            // 剔除末尾句尾标点符号，如 https://example.com. 中的 '.'
+            while !rawValue.isEmpty, let lastChar = rawValue.unicodeScalars.last, trailingPunctuation.contains(lastChar) {
+                rawValue.removeLast()
+                rawRange.length -= 1
+            }
+
+            let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            fields.append(ExtractedField(label: "链接", value: trimmed, kind: .url, sourceRange: Range(rawRange, in: text)))
         }
         return fields
     }
 
-    // MARK: - JSON 字段提取（高保真保留原始字符串、前导零与长数字）
+    // MARK: - JSON 字段提取（高保真保留原始字符串、前导零与长数字，支持嵌套作用域）
 
     private static func extractJSONFields(from text: String) -> [ExtractedField] {
         guard let data = text.data(using: .utf8) else { return [] }
@@ -287,69 +303,173 @@ public enum ContentExtractor {
             return []
         }
 
-        var fields: [ExtractedField] = []
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
 
         if let dict = json as? [String: Any] {
-            fields = extractFromJSONDict(dict, prefix: "", rawText: text)
+            return extractFromJSONDict(dict, path: [], searchRange: fullRange, rawText: text)
         } else if let array = json as? [[String: Any]], let first = array.first {
-            fields = extractFromJSONDict(first, prefix: "[0].", rawText: text)
+            return extractFromJSONDict(first, path: ["[0]"], searchRange: fullRange, rawText: text)
         }
 
-        return fields
+        return []
     }
 
-    private static func extractFromJSONDict(_ dict: [String: Any], prefix: String, rawText: String) -> [ExtractedField] {
+    private static func extractFromJSONDict(
+        _ dict: [String: Any],
+        path: [String],
+        searchRange: NSRange,
+        rawText: String
+    ) -> [ExtractedField] {
         var list: [ExtractedField] = []
-
-        // 保持键的原有字典序或出现顺序
+        let nsText = rawText as NSString
         let keys = dict.keys.sorted()
+
         for key in keys {
             let val = dict[key]
-            let label = prefix.isEmpty ? key : "\(prefix)\(key)"
+            let label = (path + [key]).joined(separator: ".")
+
+            // 在当前 searchRange 内查找 "\"key\"\s*:"
+            guard let keyMatch = findKeyInScope(key: key, in: searchRange, nsText: nsText) else {
+                continue
+            }
+            let colonEnd = keyMatch.location + keyMatch.length
+            let maxEnd = searchRange.location + searchRange.length
 
             if let str = val as? String {
-                // 字符串值：直接取用，精准保留前导零与特殊字符
-                let sourceRange = findJSONValueRange(key: key, rawText: rawText)
+                let sourceRange = findLiteralRange(from: colonEnd, maxEnd: maxEnd, nsText: nsText, rawText: rawText)
                 list.append(ExtractedField(label: label, value: str, kind: .json, sourceRange: sourceRange))
             } else if let num = val as? NSNumber {
-                // 数字或布尔值：从原文中提取原始字面量，杜绝科学计数法与精度截断
-                let rawLiteral = extractRawJSONLiteral(key: key, rawText: rawText) ?? num.stringValue
-                let sourceRange = findJSONValueRange(key: key, rawText: rawText)
-                list.append(ExtractedField(label: label, value: rawLiteral, kind: .json, sourceRange: sourceRange))
-            } else if let nested = val as? [String: Any], prefix.isEmpty {
-                // 浅层嵌套对象支持扁平化提取（仅深入一层）
-                let sub = extractFromJSONDict(nested, prefix: "\(key).", rawText: rawText)
-                list.append(contentsOf: sub.prefix(6))
+                let (literal, sourceRange) = extractLiteralAndRange(from: colonEnd, maxEnd: maxEnd, nsText: nsText, rawText: rawText)
+                let valueStr = literal ?? num.stringValue
+                list.append(ExtractedField(label: label, value: valueStr, kind: .json, sourceRange: sourceRange))
+            } else if let nested = val as? [String: Any], path.count < 2 {
+                // 递归深入一层嵌套对象，精准定位嵌套子块范围
+                if let nestedRange = findJSONObjectRange(from: colonEnd, maxEnd: maxEnd, nsText: nsText) {
+                    let sub = extractFromJSONDict(nested, path: path + [key], searchRange: nestedRange, rawText: rawText)
+                    list.append(contentsOf: sub.prefix(6))
+                }
             }
 
-            if list.count >= 15 { break }
+            if list.count >= 20 { break }
         }
 
         return list
     }
 
-    /// 从原始 JSON 字符串中精准截取某个 key 对应的原始字面量（避免 Double 转换造成的精度损失）
-    private static func extractRawJSONLiteral(key: String, rawText: String) -> String? {
-        let pattern = "\"\(NSRegularExpression.escapedPattern(for: key))\"\\s*:\\s*(\"[^\"]*\"|[^,\\s}\\]]+)"
+    private static func findKeyInScope(key: String, in scope: NSRange, nsText: NSString) -> NSRange? {
+        let pattern = "\"\(NSRegularExpression.escapedPattern(for: key))\"\\s*:"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let nsText = rawText as NSString
-        guard let match = regex.firstMatch(in: rawText, range: NSRange(location: 0, length: nsText.length)),
-              match.numberOfRanges >= 2 else { return nil }
-        var literal = nsText.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
-        if literal.hasPrefix("\"") && literal.hasSuffix("\"") && literal.count >= 2 {
-            literal = String(literal.dropFirst().dropLast())
-        }
-        return literal
+        guard let match = regex.firstMatch(in: nsText as String, range: scope) else { return nil }
+        return match.range
     }
 
-    /// 在原始 JSON 文本中定位某个 key 对应 value 的字符 Range
-    private static func findJSONValueRange(key: String, rawText: String) -> Range<String.Index>? {
-        let pattern = "\"\(NSRegularExpression.escapedPattern(for: key))\"\\s*:\\s*(\"[^\"]*\"|[^,\\s}\\]]+)"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let nsText = rawText as NSString
-        guard let match = regex.firstMatch(in: rawText, range: NSRange(location: 0, length: nsText.length)),
-              match.numberOfRanges >= 2 else { return nil }
-        let valRange = match.range(at: 1)
-        return Range(valRange, in: rawText)
+    private static func findJSONObjectRange(from colonEnd: Int, maxEnd: Int, nsText: NSString) -> NSRange? {
+        guard colonEnd < maxEnd else { return nil }
+        var pos = colonEnd
+        while pos < maxEnd {
+            let ch = nsText.character(at: pos)
+            if ch == 0x7B { // '{'
+                break
+            }
+            pos += 1
+        }
+        guard pos < maxEnd else { return nil }
+        let openPos = pos
+
+        var depth = 1
+        var inString = false
+        var escape = false
+        pos += 1
+
+        while pos < maxEnd {
+            let ch = nsText.character(at: pos)
+            if inString {
+                if escape {
+                    escape = false
+                } else if ch == 0x5C {
+                    escape = true
+                } else if ch == 0x22 {
+                    inString = false
+                }
+            } else {
+                if ch == 0x22 {
+                    inString = true
+                } else if ch == 0x7B {
+                    depth += 1
+                } else if ch == 0x7D {
+                    depth -= 1
+                    if depth == 0 {
+                        return NSRange(location: openPos, length: pos - openPos + 1)
+                    }
+                }
+            }
+            pos += 1
+        }
+        return nil
+    }
+
+    private static func extractLiteralAndRange(
+        from colonEnd: Int,
+        maxEnd: Int,
+        nsText: NSString,
+        rawText: String
+    ) -> (literal: String?, range: Range<String.Index>?) {
+        guard colonEnd < maxEnd else { return (nil, nil) }
+        var pos = colonEnd
+        while pos < maxEnd {
+            let ch = nsText.character(at: pos)
+            if ch != 0x20 && ch != 0x09 && ch != 0x0A && ch != 0x0D {
+                break
+            }
+            pos += 1
+        }
+        guard pos < maxEnd else { return (nil, nil) }
+        let startPos = pos
+
+        let firstCh = nsText.character(at: pos)
+        if firstCh == 0x22 { // 引号字符串
+            pos += 1
+            var escape = false
+            while pos < maxEnd {
+                let ch = nsText.character(at: pos)
+                if escape {
+                    escape = false
+                } else if ch == 0x5C {
+                    escape = true
+                } else if ch == 0x22 {
+                    pos += 1
+                    break
+                }
+                pos += 1
+            }
+            let valRange = NSRange(location: startPos, length: pos - startPos)
+            var raw = nsText.substring(with: valRange)
+            if raw.hasPrefix("\"") && raw.hasSuffix("\"") && raw.count >= 2 {
+                raw = String(raw.dropFirst().dropLast())
+            }
+            return (raw, Range(valRange, in: rawText))
+        } else {
+            // 数字、布尔值等
+            while pos < maxEnd {
+                let ch = nsText.character(at: pos)
+                if ch == 0x2C || ch == 0x7D || ch == 0x5D || ch == 0x20 || ch == 0x09 || ch == 0x0A || ch == 0x0D {
+                    break
+                }
+                pos += 1
+            }
+            let valRange = NSRange(location: startPos, length: pos - startPos)
+            let raw = nsText.substring(with: valRange).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (raw, Range(valRange, in: rawText))
+        }
+    }
+
+    private static func findLiteralRange(
+        from colonEnd: Int,
+        maxEnd: Int,
+        nsText: NSString,
+        rawText: String
+    ) -> Range<String.Index>? {
+        extractLiteralAndRange(from: colonEnd, maxEnd: maxEnd, nsText: nsText, rawText: rawText).range
     }
 }

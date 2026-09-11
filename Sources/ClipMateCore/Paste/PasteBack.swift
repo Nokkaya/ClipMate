@@ -16,6 +16,7 @@ public enum PasteFallbackReason: Equatable {
     case permissionDenied
     case targetUnavailable
     case pasteFailed
+    case newCopyDetected
 }
 
 /// 粘贴回写：写剪贴板 → 对前台应用合成 ⌘V → 恢复原剪贴板（不污染用户剪贴板）。
@@ -201,14 +202,25 @@ public enum PasteBack {
         let snapshot = snapshotPasteboard()
         suppress?(2.0 + Double(contents.count))
         var delay = 0.15
-        var lastWrittenChangeCount = 0
+        var isCancelled = false
+        var lastWrittenChangeCount = NSPasteboard.general.changeCount
 
         for content in contents {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard !isCancelled else { return }
                 if let targetApp, targetApp.isTerminated {
+                    isCancelled = true
                     onFallback?(.targetUnavailable)
                     return
                 }
+
+                // CM-07: 每次写入前核验剪贴板归属；若外部产生新复制，立刻终止队列写入并保护用户新内容
+                if NSPasteboard.general.changeCount != lastWrittenChangeCount {
+                    isCancelled = true
+                    onFallback?(.newCopyDetected)
+                    return
+                }
+
                 lastWrittenChangeCount = write(content)
                 let posted = pasteToFrontmost(pid: pid)
                 if !posted {
@@ -219,6 +231,7 @@ public enum PasteBack {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.4) {
+            guard !isCancelled else { return }
             if let snapshot, shouldRestorePasteboard(writtenChangeCount: lastWrittenChangeCount) {
                 restorePasteboard(snapshot)
             }

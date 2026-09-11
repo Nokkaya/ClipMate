@@ -298,17 +298,22 @@ final class PanelController {
                 viewModel.moveSelection(event.keyCode == 125 ? 1 : -1)
             }
             return true
-        case 123, 124: // 左右方向键：在选中行的局部字段间移动焦点
-            if event.keyCode == 124 {
-                viewModel.moveFieldSelection(1)
-            } else {
-                viewModel.moveFieldSelection(-1)
+        case 123, 124: // 左右方向键
+            // CM-05: 检查当前文本输入焦点，未处于字段焦点时交还系统文本光标移动
+            let isTextViewFocused = (panel.firstResponder is NSTextView)
+            if viewModel.selectedFieldIndex != nil || flags.contains(.option) || !isTextViewFocused {
+                if event.keyCode == 124 {
+                    viewModel.moveFieldSelection(1)
+                } else {
+                    viewModel.moveFieldSelection(-1)
+                }
+                return true
             }
-            return true
+            return false // 允许在搜索框等文本控件中进行正常的字符左右光标移动
+
         case 36: // Return
-            if let fieldIdx = viewModel.selectedFieldIndex {
-                viewModel.pasteField(at: fieldIdx)
-            } else if flags.contains(.command) && flags.contains(.shift) {
+            // CM-05: 优先处理带有修饰键（⌘、⇧、⌥等）的快捷键，保证已有组合键原有语义不受破坏
+            if flags.contains(.command) && flags.contains(.shift) {
                 viewModel.pasteQueue()          // ⌘⇧⏎ 顺序粘贴队列
             } else if flags.contains(.command) && flags.contains(.option) {
                 viewModel.pasteAsPlainText()    // ⌘⌥⏎ 粘贴为纯文本
@@ -326,6 +331,9 @@ final class PanelController {
                 } else {
                     _ = viewModel.toggleQueue() // ⇧⏎ 加入/移出队列
                 }
+            } else if let fieldIdx = viewModel.selectedFieldIndex {
+                // 仅在明确进入字段高亮且无修饰键时，纯 Return 粘贴选中字段
+                viewModel.pasteField(at: fieldIdx)
             } else {
                 viewModel.pasteSelected()       // ⏎ 粘贴
             }

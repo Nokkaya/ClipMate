@@ -180,9 +180,10 @@ public enum AutoTagger {
 
 
     public static func isCode(_ text: String) -> Bool {
+        let sample = String(decoding: text.utf8.prefix(4096), as: UTF8.self)
         let markers = ["func ", "def ", "class ", "import ", "const ", "return ", "};", ");",
                        "->", "=>", "==", "<!--", "SELECT ", "public ", "#include", "```"]
-        return markers.filter { text.contains($0) }.count >= 2
+        return markers.filter { sample.contains($0) }.count >= 2
     }
 
     public static func isJSON(_ text: String) -> Bool {
