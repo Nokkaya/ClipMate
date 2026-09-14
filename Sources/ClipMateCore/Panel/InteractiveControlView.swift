@@ -367,36 +367,66 @@ public struct InteractiveControlCard: View {
             }
 
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     let origLines = session.originalText.components(separatedBy: .newlines)
                     let newLines = session.effectiveText.components(separatedBy: .newlines)
                     ForEach(0..<max(origLines.count, newLines.count), id: \.self) { idx in
                         let oLine = idx < origLines.count ? origLines[idx] : nil
                         let nLine = idx < newLines.count ? newLines[idx] : nil
                         if let o = oLine, let n = nLine, o != n {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("- " + o)
-                                    .font(.system(size: 10.5, design: .monospaced))
-                                    .foregroundStyle(Color.red.opacity(0.8))
-                                    .strikethrough()
-                                Text("+ " + n)
-                                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(Color.green)
+                            VStack(alignment: .leading, spacing: 1.5) {
+                                HStack(alignment: .top, spacing: 4) {
+                                    Text("-")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(Color.red.opacity(0.55))
+                                    Text(o)
+                                        .font(.system(size: 10.5, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .strikethrough(true, color: Color.red.opacity(0.35))
+                                }
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.red.opacity(0.06)))
+
+                                HStack(alignment: .top, spacing: 4) {
+                                    Text("+")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(theme.accent)
+                                    Text(n)
+                                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(theme.accent)
+                                }
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(theme.accent.opacity(0.08)))
                             }
                             .padding(.vertical, 1)
-                            .padding(.horizontal, 4)
-                            .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.04)))
                         } else if let n = nLine {
-                            Text("  " + n)
-                                .font(.system(size: 10.5, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                            HStack(alignment: .top, spacing: 4) {
+                                Text(" ")
+                                    .font(.system(size: 10, design: .monospaced))
+                                Text(n)
+                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .foregroundStyle(.secondary.opacity(0.8))
+                            }
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 0.5)
                         }
                     }
                 }
                 .padding(6)
             }
             .frame(maxHeight: 140)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.12)))
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+            )
         }
     }
 
