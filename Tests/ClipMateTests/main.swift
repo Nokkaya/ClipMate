@@ -2239,7 +2239,246 @@ runner.run("Acceptance - CM-14: 动作屏蔽与动作使用频率加权正确生
     runner.expectFalse(store.mutedActionKinds.contains(ContentActionKind.fixLineBreaks.rawValue), "取消屏蔽成功")
 }
 
+// MARK: - 内容控件 (Interactive Content Controls) 单元测试
+
+runner.run("Interactive - Phase 1 & 2: 菜谱份数比例缩放与正文联动") {
+    let recipeText = """
+    四人份蔬菜鸡肉煲
+    食材准备：
+    - 米 400 克
+    - 牛奶 200 毫升
+    - 鸡蛋 2 个
+    - 盐 适量
+    - 烤箱温度 180°C
+
+    制作步骤：
+    1. 先将米洗净。
+    2. 加入 200 毫升牛奶和打散的 2 个鸡蛋。
+    3. 放入烤箱以 180°C 烤 20 分钟。
+    """
+
+    guard var session = InteractiveControlEngine.analyze(text: recipeText, itemID: 1001) else {
+        runner.expectTrue(false, "应成功识别菜谱内容控件")
+        return
+    }
+
+    runner.expectEqual(session.patternType, .recipe, "识别为菜谱类型")
+    runner.expectEqual(session.primaryVariable?.name, "人数", "主变量为人数")
+    runner.expectEqual(session.primaryVariable?.baseValue.asNumber, 4.0, "基准人数为 4")
+
+    // 调为 7 人
+    if let idx = session.variables.firstIndex(where: { $0.id == "servings" }) {
+        session.variables[idx].currentValue = .number(7.0)
+    }
+    InteractiveControlEngine.recalculate(session: &session)
+
+    let updated = session.adjustedText
+    runner.expectTrue(updated.contains("7人份"), "标题/份数更新为 7人份")
+    runner.expectTrue(updated.contains("700 克"), "米由 400 克缩放为 700 克")
+    runner.expectTrue(updated.contains("350 毫升"), "牛奶由 200 毫升缩放为 350 毫升")
+    runner.expectTrue(updated.contains("3.5 个"), "鸡蛋由 2 个缩放为 3.5 个")
+    runner.expectTrue(updated.contains("加入 350 毫升牛奶"), "步骤中的牛奶用量同步更新")
+    runner.expectTrue(updated.contains("打散的 3.5 个鸡蛋"), "步骤中的鸡蛋用量同步更新")
+    runner.expectTrue(updated.contains("盐 适量"), "盐 适量 模糊用量保持原样")
+    runner.expectTrue(updated.contains("180°C"), "烤箱温度保持原样")
+    runner.expectTrue(updated.contains("20 分钟"), "烘烤时长保持原样")
+
+    // 检查关于 3.5 个鸡蛋的整件建议
+    runner.expectTrue(session.conflicts.contains(where: { $0.message.contains("鸡蛋") && $0.message.contains("整件") }), "给出鸡蛋建议取整提示")
+}
+
+runner.run("Interactive - Phase 2: 物料清单线性计算 (单价 × 数量 + 固定费)") {
+    let bomText = """
+    采购清单：
+    - 物料：工业传感器
+    - 单价：20 元
+    - 数量：3 件
+    - 运费：10 元
+    - 总额：70 元
+    """
+
+    guard var session = InteractiveControlEngine.analyze(text: bomText, itemID: 1002) else {
+        runner.expectTrue(false, "应成功识别物料计算清单")
+        return
+    }
+
+    runner.expectEqual(session.patternType, .bomCalculation, "识别为线性计算类型")
+    runner.expectEqual(session.primaryVariable?.name, "数量", "主变量为数量")
+    runner.expectEqual(session.primaryVariable?.baseValue.asNumber, 3.0, "初始数量为 3")
+
+    // 数量调整为 5 件
+    if let idx = session.variables.firstIndex(where: { $0.id == "quantity" }) {
+        session.variables[idx].currentValue = .number(5.0)
+    }
+    InteractiveControlEngine.recalculate(session: &session)
+
+    let updated = session.adjustedText
+    runner.expectTrue(updated.contains("数量：5 件") || updated.contains("5 件"), "数量更新为 5 件")
+    runner.expectTrue(updated.contains("110 元"), "总额重算为 110 元 (20*5+10)")
+    runner.expectTrue(updated.contains("单价：20 元"), "单价保持不变")
+    runner.expectTrue(updated.contains("运费：10 元"), "固定运费保持不变")
+}
+
+runner.run("Interactive - Phase 3: 会议与活动日程时间顺延与冲突检测") {
+    let scheduleText = """
+    技术分享会安排：
+    14:00–14:45 分享 (45分钟)
+    14:45–15:00 休息 (15分钟)
+    15:00–15:30 讨论 (30分钟)
+    说明：必须在 16:45 结束，场地需清场。
+    """
+
+    guard var session = InteractiveControlEngine.analyze(text: scheduleText, itemID: 1003) else {
+        runner.expectTrue(false, "应成功识别活动排期")
+        return
+    }
+
+    runner.expectEqual(session.patternType, .schedule, "识别为日程类型")
+    runner.expectEqual(session.primaryVariable?.baseValue.displayText, "14:00", "初始开始时间为 14:00")
+
+    // 将开始时间推迟至 15:30
+    if let idx = session.variables.firstIndex(where: { $0.id == "start_time" }) {
+        session.variables[idx].currentValue = .time(hour: 15, minute: 30)
+    }
+    InteractiveControlEngine.recalculate(session: &session)
+
+    let updated = session.adjustedText
+    runner.expectTrue(updated.contains("15:30–16:15 分享"), "分享顺延至 15:30–16:15")
+    runner.expectTrue(updated.contains("16:15–16:30 休息"), "休息顺延至 16:15–16:30")
+    runner.expectTrue(updated.contains("16:30–17:00 讨论"), "讨论顺延至 16:30–17:00")
+
+    // 检查冲突：17:00 超过 16:45 截止时间 15 分钟
+    runner.expectTrue(session.conflicts.contains(where: { $0.message.contains("超时 15 分钟") }), "准确检测到超出固定截止时间 15 分钟冲突")
+}
+
+runner.run("Interactive - Phase 3: 差旅行程相对日期偏移与星期推导") {
+    let itineraryText = """
+    东京之旅
+    出发日期：2026-10-01
+    第 1 天 (10月1日 周四)：抵达与入住
+    第 2 天 (10月2日 周五)：涩谷游览
+    第 3 天 (10月3日 周六)：音乐节活动 (固定门票)
+    """
+
+    guard var session = InteractiveControlEngine.analyze(text: itineraryText, itemID: 1004) else {
+        runner.expectTrue(false, "应成功识别行程日程")
+        return
+    }
+
+    runner.expectEqual(session.patternType, .itinerary, "识别为行程类型")
+
+    // 出发日期顺延至 2026-10-05 (周一)
+    if let idx = session.variables.firstIndex(where: { $0.id == "start_date" }) {
+        session.variables[idx].currentValue = .date(year: 2026, month: 10, day: 5)
+    }
+    InteractiveControlEngine.recalculate(session: &session)
+
+    let updated = session.adjustedText
+    runner.expectTrue(updated.contains("2026-10-05"), "出发日期更新为 2026-10-05")
+    runner.expectTrue(updated.contains("10月5日 周一"), "第 1 天推导为 10月5日 周一")
+    runner.expectTrue(updated.contains("10月6日 周二"), "第 2 天推导为 10月6日 周二")
+    runner.expectTrue(updated.contains("10月3日 周六"), "固定门票事项保持原日期不变")
+}
+
+runner.run("Interactive - Phase 4: 单项锁定 (Item Locking) 保护") {
+    let recipeText = """
+    4人份蛋糕：
+    - 面粉 200 克
+    - 糖 100 克
+    - 黄油 100 克
+    """
+
+    guard var session = InteractiveControlEngine.analyze(text: recipeText, itemID: 1005) else {
+        runner.expectTrue(false, "应识别蛋糕配方")
+        return
+    }
+
+    // 锁定糖为 100 克
+    if let sugarIdx = session.dependents.firstIndex(where: { $0.name.contains("糖") }) {
+        session.dependents[sugarIdx].isLocked = true
+    }
+
+    // 份数翻倍：4 -> 8 人
+    if let idx = session.variables.firstIndex(where: { $0.id == "servings" }) {
+        session.variables[idx].currentValue = .number(8.0)
+    }
+    InteractiveControlEngine.recalculate(session: &session)
+
+    let updated = session.adjustedText
+    runner.expectTrue(updated.contains("400 克"), "未锁定的面粉翻倍为 400 克")
+    runner.expectTrue(updated.contains("100 克"), "锁定的糖保持 100 克不变")
+}
+
+runner.run("Interactive - Phase 1: 缺失基准份数提示与补齐") {
+    let missingServingsText = """
+    食材准备：
+    - 面粉 300 克
+    - 酵母 5 克
+    - 水 180 毫升
+    """
+
+    guard let session = InteractiveControlEngine.analyze(text: missingServingsText, itemID: 1006) else {
+        runner.expectTrue(false, "应识别出需要补齐份数的配方")
+        return
+    }
+
+    runner.expectTrue(session.missingConstraint != nil, "检测到缺失基准份数提示")
+    runner.expectEqual(session.missingConstraint?.suggestedValues, [1, 2, 4], "提供推荐候选份数")
+}
+
+runner.run("Interactive - Phase 6: 粘贴变焦多层级生成 (Paste Zoom)") {
+    let recipeText = """
+    4人份意大利面：
+    - 意面 400 克
+    - 番茄酱 200 克
+    - 橄榄油 30 毫升
+
+    制作步骤：
+    1. 烧水煮面 10 分钟。
+    2. 热锅下橄榄油翻炒番茄酱。
+    3. 混合装盘。
+    """
+
+    guard let session = InteractiveControlEngine.analyze(text: recipeText, itemID: 1007) else {
+        runner.expectTrue(false, "应识别意大利面配方")
+        return
+    }
+
+    let zoom = session.zoomLevels
+    runner.expectTrue(zoom[.full]?.contains("4人份意大利面") == true, "完整层级包含原文标题")
+    runner.expectTrue(zoom[.keyPoints]?.contains("意面：400 克") == true, "核心要点包含食材清单")
+    runner.expectTrue(zoom[.actionItems]?.contains("烧水煮面") == true, "结论清单包含步骤重点")
+    runner.expectTrue(zoom[.oneLine]?.contains("4人份") == true, "一句话概括包含主参数")
+}
+
+runner.run("Interactive - Phase 5: PanelViewModel 状态保持、复位与复制粘贴联动") {
+    let text = "4人份家常豆腐：\n- 豆腐 400 克\n- 生抽 20 毫升"
+    let (store, _) = try makeTempStore()
+    _ = try store.capture(kind: .text, plainText: text, sourceBundle: "com.test", sourceName: "Test")
+    let item = store.search(query: "", filter: .all, limit: 1).first!
+
+    let monitor = ClipboardMonitor(settings: AppSettings(), store: store)
+    let front = FrontAppTracker()
+    let ai = AIService(settings: AppSettings())
+    let vm = PanelViewModel(store: store, settings: AppSettings(), monitor: monitor, frontApps: front, ai: ai)
+    vm.reload()
+
+    runner.expectTrue(vm.activeInteractiveSession != nil, "ViewModel 自动载入选中项的交互控件会话")
+    runner.expectEqual(vm.activeInteractiveSession?.primaryVariable?.currentValue.asNumber, 4.0, "初始人数为 4")
+
+    // 调节主变量
+    vm.adjustPrimaryVariable(delta: 1)
+    runner.expectEqual(vm.activeInteractiveSession?.primaryVariable?.currentValue.asNumber, 5.0, "调节后人数为 5")
+    runner.expectTrue(vm.activeInteractiveSession?.isModified == true, "会话状态标记为已修改")
+
+    // 复位重置
+    vm.resetInteractiveSession(itemID: item.id)
+    runner.expectEqual(vm.activeInteractiveSession?.primaryVariable?.currentValue.asNumber, 4.0, "复位后人数还原为 4")
+    runner.expectFalse(vm.activeInteractiveSession?.isModified == true, "会话状态还原为未修改")
+}
+
 print("----")
+
 
 
 if runner.failures.isEmpty {

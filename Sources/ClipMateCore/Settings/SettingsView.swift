@@ -962,6 +962,32 @@ private struct CaptureTab: View {
                     }
                 }
 
+                // 内容控件与变焦
+                SettingsCard("内容控件与变焦", icon: "slider.horizontal.3", iconColor: .blue) {
+                    VStack(spacing: 10) {
+                        SettingsRow("启用内容控件", subtitle: "自动识别剪贴板内容中的可调变量、比例缩放、时间与计算联动") {
+                            Toggle("", isOn: $settings.enableInteractiveClips)
+                                .toggleStyle(.switch)
+                        }
+
+                        if settings.enableInteractiveClips {
+                            Divider().overlay(Color.primary.opacity(0.04))
+
+                            SettingsRow("仅在本地分析", subtitle: "使用纯本地轻量规则引擎识别，绝不上传剪贴板历史") {
+                                Toggle("", isOn: $settings.interactiveClipsLocalOnly)
+                                    .toggleStyle(.switch)
+                            }
+
+                            Divider().overlay(Color.primary.opacity(0.04))
+
+                            SettingsRow("启用粘贴变焦", subtitle: "允许在预览中即时切换完整、要点、清单或一句话等信息层级") {
+                                Toggle("", isOn: $settings.enablePasteZoom)
+                                    .toggleStyle(.switch)
+                            }
+                        }
+                    }
+                }
+
                 // 卡片 4: 检索引擎
                 SettingsCard(L10n.tr("capture.card_db"), icon: "cylinder.split.1x2", iconColor: .green) {
                     HStack(spacing: 10) {

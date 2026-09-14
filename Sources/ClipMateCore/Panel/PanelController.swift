@@ -261,6 +261,17 @@ final class PanelController {
             return true
         }
 
+        // ⌥[ / ⌥- 与 ⌥] / ⌥+：调节内容控件主变量（如份数、时间）
+        if optOnly && viewModel.activeInteractiveSession != nil {
+            if event.keyCode == 30 || event.keyCode == 24 { // ] 或 =/+
+                viewModel.adjustPrimaryVariable(delta: 1)
+                return true
+            } else if event.keyCode == 33 || event.keyCode == 27 { // [ 或 -
+                viewModel.adjustPrimaryVariable(delta: -1)
+                return true
+            }
+        }
+
         // 编辑浮层：除 Esc 外放行给 TextEditor
         if viewModel.showEditOverlay {
             if event.keyCode == 53 { viewModel.showEditOverlay = false; return true }
@@ -349,9 +360,25 @@ final class PanelController {
                 return true
             }
             return false
-        case 53: // Esc：退字段焦点 → 清多选 → 收起 AI 侧边栏 → 清搜索词 → 隐藏
+        case 30, 24: // ] 或 +
+            let isTextViewFocused = (panel.firstResponder is NSTextView)
+            if !isTextViewFocused && viewModel.activeInteractiveSession != nil {
+                viewModel.adjustPrimaryVariable(delta: 1)
+                return true
+            }
+            return false
+        case 33, 27: // [ 或 -
+            let isTextViewFocused = (panel.firstResponder is NSTextView)
+            if !isTextViewFocused && viewModel.activeInteractiveSession != nil {
+                viewModel.adjustPrimaryVariable(delta: -1)
+                return true
+            }
+            return false
+        case 53: // Esc：退字段焦点 → 复位控件修改 → 清多选 → 收起 AI 侧边栏 → 清搜索词 → 隐藏
             if viewModel.selectedFieldIndex != nil {
                 viewModel.selectedFieldIndex = nil
+            } else if let session = viewModel.activeInteractiveSession, session.isModified {
+                viewModel.resetInteractiveSession(itemID: session.itemID)
             } else if viewModel.multiSelectedIDs.count > 0 {
                 viewModel.clearMultiSelection()
             } else if viewModel.isAISidebarOpen {

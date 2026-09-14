@@ -28,7 +28,32 @@ struct PreviewOverlay: View {
                     if !fields.isEmpty {
                         extractedFieldsBar(fields)
                     }
-                    if let result = viewModel.activeActionResult, result.itemID == item.id {
+                    if let sessionBinding = viewModel.bindingForInteractiveSession(for: item) {
+                        InteractiveControlCard(
+                            session: sessionBinding,
+                            theme: viewModel.settings.appTheme,
+                            language: viewModel.settings.appLanguage,
+                            onPaste: {
+                                viewModel.pasteInteractiveResult(for: item.id)
+                                viewModel.previewItem = nil
+                            },
+                            onCopy: { viewModel.copyInteractiveResult(for: item.id) },
+                            onReset: { viewModel.resetInteractiveSession(itemID: item.id) },
+                            onToggleLock: { depId in viewModel.toggleInteractiveLock(itemID: item.id, dependentID: depId) },
+                            onResolveMissing: { val in viewModel.resolveMissingConstraint(itemID: item.id, baseValue: val) }
+                        )
+
+                        if viewModel.settings.enablePasteZoom {
+                            PasteZoomBar(
+                                currentZoom: Binding(
+                                    get: { sessionBinding.wrappedValue.currentZoom },
+                                    set: { newLevel in viewModel.setZoomLevel(itemID: item.id, level: newLevel) }
+                                ),
+                                theme: viewModel.settings.appTheme,
+                                onLevelChanged: { newLevel in viewModel.setZoomLevel(itemID: item.id, level: newLevel) }
+                            )
+                        }
+                    } else if let result = viewModel.activeActionResult, result.itemID == item.id {
                         InlineActionResultCard(
                             result: result,
                             theme: viewModel.settings.appTheme,
@@ -534,24 +559,25 @@ struct PreviewOverlay: View {
             }
 
             ScrollView {
+                let displayText = viewModel.interactiveSession(for: item)?.effectiveText ?? item.plainText
                 if let selected = selectedField {
-                    Text(TextHighlighter.highlight(text: item.plainText, query: selected.value))
+                    Text(TextHighlighter.highlight(text: displayText, query: selected.value))
                         .font(.system(size: 12, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
-                } else if let numberText = NumberRecognizer.displayText(item.plainText) {
+                } else if let numberText = NumberRecognizer.displayText(displayText) {
                     // 号码类内容：分组 + 放大等宽，便于逐位核对
                     Text(numberText)
                         .font(.system(size: 15, weight: .medium, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 } else if !viewModel.query.isEmpty {
-                    Text(TextHighlighter.highlight(text: item.plainText, query: viewModel.query))
+                    Text(TextHighlighter.highlight(text: displayText, query: viewModel.query))
                         .font(.system(size: 12, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 } else {
-                    Text(item.plainText)
+                    Text(displayText)
                         .font(.system(size: 12, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)

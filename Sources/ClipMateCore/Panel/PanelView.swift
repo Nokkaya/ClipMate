@@ -433,7 +433,13 @@ struct ClipList: View {
                             onPasteActionResult: { viewModel.pasteActionResult() },
                             onCopyActionResult: { viewModel.copyActionResult() },
                             onChangeTargetLanguage: { lang in viewModel.executeAction(.translate, on: item, targetLanguage: lang) },
-                            onMuteAction: { action in viewModel.muteAction(action) }
+                            onMuteAction: { action in viewModel.muteAction(action) },
+                            interactiveSessionBinding: isSelected ? viewModel.bindingForInteractiveSession(for: item) : nil,
+                            onPasteInteractive: { viewModel.pasteInteractiveResult(for: item.id) },
+                            onCopyInteractive: { viewModel.copyInteractiveResult(for: item.id) },
+                            onResetInteractive: { viewModel.resetInteractiveSession(itemID: item.id) },
+                            onToggleInteractiveLock: { depId in viewModel.toggleInteractiveLock(itemID: item.id, dependentID: depId) },
+                            onResolveInteractiveMissing: { val in viewModel.resolveMissingConstraint(itemID: item.id, baseValue: val) }
                         )
                         .equatable()
 

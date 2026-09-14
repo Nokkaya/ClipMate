@@ -298,6 +298,18 @@ public final class AppSettings: ObservableObject {
     @Published public var enableSmartRecommendations: Bool {
         didSet { defaults.set(enableSmartRecommendations, forKey: "enableSmartRecommendations") }
     }
+    /// 内容控件开关
+    @Published public var enableInteractiveClips: Bool {
+        didSet { defaults.set(enableInteractiveClips, forKey: "enableInteractiveClips") }
+    }
+    /// 内容控件仅本地离线识别
+    @Published public var interactiveClipsLocalOnly: Bool {
+        didSet { defaults.set(interactiveClipsLocalOnly, forKey: "interactiveClipsLocalOnly") }
+    }
+    /// 粘贴变焦开关
+    @Published public var enablePasteZoom: Bool {
+        didSet { defaults.set(enablePasteZoom, forKey: "enablePasteZoom") }
+    }
     /// 推荐学习本地存储数据
     @Published public var recommendationStore: RecommendationLearningStore {
         didSet {
@@ -348,6 +360,9 @@ public final class AppSettings: ObservableObject {
             "appLanguage": "system",
             "appTheme": "default",
             "autoCheckUpdates": true,
+            "enableInteractiveClips": true,
+            "interactiveClipsLocalOnly": true,
+            "enablePasteZoom": true,
         ])
         hotkeyPresetID = defaults.string(forKey: "hotkeyPresetID") ?? "cmdShiftV"
         retentionMaxItems = defaults.integer(forKey: "retentionMaxItems")
@@ -402,6 +417,9 @@ public final class AppSettings: ObservableObject {
         }
 
         enableSmartRecommendations = defaults.object(forKey: "enableSmartRecommendations") as? Bool ?? true
+        enableInteractiveClips = defaults.object(forKey: "enableInteractiveClips") as? Bool ?? true
+        interactiveClipsLocalOnly = defaults.object(forKey: "interactiveClipsLocalOnly") as? Bool ?? true
+        enablePasteZoom = defaults.object(forKey: "enablePasteZoom") as? Bool ?? true
         if let recData = defaults.data(forKey: "recommendationStore"),
            let store = try? JSONDecoder().decode(RecommendationLearningStore.self, from: recData) {
             recommendationStore = store

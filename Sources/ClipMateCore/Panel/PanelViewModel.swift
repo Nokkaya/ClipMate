@@ -45,6 +45,7 @@ public final class PanelViewModel: ObservableObject {
                 activeActionResult = nil
             }
             syncAITargetIfNeeded()
+            updateActiveInteractiveSession()
         }
     }
     /// 选中锚点：以条目 id 记录，列表重排（新采集置顶等）后选中不漂移。
@@ -59,6 +60,10 @@ public final class PanelViewModel: ObservableObject {
     @Published public var activeActionResult: InlineActionResult? = nil
     private var actionCache: [String: RecommendedAction?] = [:]
     private var actionTask: Task<Void, Never>?
+
+    /// 内容控件交互会话存储与活跃会话
+    @Published public var activeInteractiveSession: InteractiveSession? = nil
+    private var interactiveSessions: [Int64: InteractiveSession] = [:]
 
     /// 智能内容推荐（最多 3 条，独立推荐区展示，不影响普通历史顺序与数字快捷键）
     @Published public var recommendations: [RecommendedItem] = []
@@ -268,6 +273,7 @@ public final class PanelViewModel: ObservableObject {
         multiSelectedIDs.formIntersection(visibleIDs)
         syncAITargetIfNeeded()
         refreshRecommendations()
+        updateActiveInteractiveSession()
     }
 
     private func itemCacheKey(for item: ClipItem) -> String {
@@ -278,6 +284,10 @@ public final class PanelViewModel: ObservableObject {
         thumbCache.removeObject(forKey: NSNumber(value: id))
         fieldsCache = fieldsCache.filter { !$0.key.hasPrefix("\(id):") }
         actionCache = actionCache.filter { !$0.key.hasPrefix("\(id):") }
+        interactiveSessions.removeValue(forKey: id)
+        if activeInteractiveSession?.itemID == id {
+            activeInteractiveSession = nil
+        }
         if activeActionResult?.itemID == id {
             cancelAction()
             activeActionResult = nil
@@ -369,6 +379,10 @@ public final class PanelViewModel: ObservableObject {
 
     public func pasteSelected() {
         guard let item = selectedItem else { return }
+        if let session = activeInteractiveSession, session.itemID == item.id, session.isModified {
+            pasteInteractiveResult(for: item.id)
+            return
+        }
         paste(item: item)
     }
 
@@ -442,6 +456,10 @@ public final class PanelViewModel: ObservableObject {
 
     public func copySelected() {
         guard let item = selectedItem else { return }
+        if let session = activeInteractiveSession, session.itemID == item.id, session.isModified {
+            copyInteractiveResult(for: item.id)
+            return
+        }
         copy(item: item)
     }
 
@@ -450,6 +468,172 @@ public final class PanelViewModel: ObservableObject {
         guard let content = store.pasteboardContent(for: item) else { return }
         PasteBack.write(content)
         monitor.suppress(seconds: 1.5)
+    }
+
+    // MARK: - 内容控件 (Interactive Content Controls)
+
+    public func updateActiveInteractiveSession() {
+        guard settings.enableInteractiveClips, let item = selectedItem else {
+            activeInteractiveSession = nil
+            return
+        }
+        if let cached = interactiveSessions[item.id] {
+            activeInteractiveSession = cached
+        } else if let session = InteractiveControlEngine.analyze(text: item.plainText, itemID: item.id) {
+            interactiveSessions[item.id] = session
+            activeInteractiveSession = session
+        } else {
+            activeInteractiveSession = nil
+        }
+    }
+
+    public func bindingForInteractiveSession(for item: ClipItem) -> Binding<InteractiveSession>? {
+        guard let session = interactiveSession(for: item) else { return nil }
+        return Binding(
+            get: { [weak self] in
+                self?.interactiveSessions[item.id] ?? session
+            },
+            set: { [weak self] newSession in
+                self?.interactiveSessions[item.id] = newSession
+                if self?.selectedID == item.id {
+                    self?.activeInteractiveSession = newSession
+                }
+            }
+        )
+    }
+
+    public func interactiveSession(for item: ClipItem) -> InteractiveSession? {
+        guard settings.enableInteractiveClips else { return nil }
+        if let cached = interactiveSessions[item.id] {
+            return cached
+        }
+        if let session = InteractiveControlEngine.analyze(text: item.plainText, itemID: item.id) {
+            interactiveSessions[item.id] = session
+            return session
+        }
+        return nil
+    }
+
+    public func resetInteractiveSession(itemID: Int64) {
+        guard var session = interactiveSessions[itemID] else { return }
+        for i in 0..<session.variables.count {
+            session.variables[i].currentValue = session.variables[i].baseValue
+        }
+        for i in 0..<session.dependents.count {
+            session.dependents[i].isLocked = false
+        }
+        session.currentZoom = .full
+        InteractiveControlEngine.recalculate(session: &session)
+        interactiveSessions[itemID] = session
+        if selectedID == itemID {
+            activeInteractiveSession = session
+        }
+        HapticHelper.alignment()
+    }
+
+    public func toggleInteractiveLock(itemID: Int64, dependentID: String) {
+        guard var session = interactiveSessions[itemID] else { return }
+        if let idx = session.dependents.firstIndex(where: { $0.id == dependentID }) {
+            session.dependents[idx].isLocked.toggle()
+            InteractiveControlEngine.recalculate(session: &session)
+            interactiveSessions[itemID] = session
+            if selectedID == itemID {
+                activeInteractiveSession = session
+            }
+            HapticHelper.alignment()
+        }
+    }
+
+    public func resolveMissingConstraint(itemID: Int64, baseValue: Double) {
+        guard var session = interactiveSessions[itemID] else { return }
+        session.missingConstraint = nil
+        if let idx = session.variables.firstIndex(where: { $0.id == "servings" }) {
+            session.variables[idx].baseValue = .number(baseValue)
+            session.variables[idx].currentValue = .number(baseValue)
+        }
+        InteractiveControlEngine.recalculate(session: &session)
+        interactiveSessions[itemID] = session
+        if selectedID == itemID {
+            activeInteractiveSession = session
+        }
+        HapticHelper.alignment()
+    }
+
+    public func setZoomLevel(itemID: Int64, level: ZoomLevel) {
+        guard var session = interactiveSessions[itemID] else { return }
+        session.currentZoom = level
+        interactiveSessions[itemID] = session
+        if selectedID == itemID {
+            activeInteractiveSession = session
+        }
+        HapticHelper.alignment()
+    }
+
+    public func pasteInteractiveResult(for itemID: Int64? = nil) {
+        let targetID = itemID ?? selectedID
+        guard let id = targetID, let session = interactiveSessions[id] else { return }
+        if let item = items.first(where: { $0.id == id }) {
+            recordUsage(item: item)
+        }
+        pasteContent(.text(session.effectiveText))
+    }
+
+    public func copyInteractiveResult(for itemID: Int64? = nil) {
+        let targetID = itemID ?? selectedID
+        guard let id = targetID, let session = interactiveSessions[id] else { return }
+        PasteBack.write(.text(session.effectiveText))
+        monitor.suppress(seconds: 1.5)
+        HapticHelper.feedback()
+        ToastHUD.shared.show(
+            icon: "checkmark",
+            title: "已复制调整后内容",
+            subtitle: session.changeSummary,
+            duration: 1.5
+        )
+    }
+
+    public func adjustPrimaryVariable(delta: Double) {
+        guard let id = selectedID, var session = interactiveSessions[id] else { return }
+        guard let prim = session.primaryVariable,
+              let idx = session.variables.firstIndex(where: { $0.id == prim.id }) else { return }
+        var v = session.variables[idx]
+        switch v.kind {
+        case .stepper(let minVal, let maxVal, let step, _, _):
+            let stepVal = delta > 0 ? step : -step
+            let next = Swift.max(minVal, min(maxVal, v.currentValue.asNumber + stepVal))
+            v.currentValue = .number(next)
+        case .time(let stepMins):
+            if case .time(let h, let m) = v.currentValue {
+                let change = delta > 0 ? stepMins : -stepMins
+                var tot = (h * 60 + m + change) % (24 * 60)
+                if tot < 0 { tot += 24 * 60 }
+                v.currentValue = .time(hour: tot / 60, minute: tot % 60)
+            }
+        case .duration(let stepMins, _):
+            if case .durationMinutes(let m) = v.currentValue {
+                let change = delta > 0 ? stepMins : -stepMins
+                v.currentValue = .durationMinutes(Swift.max(5, m + change))
+            }
+        case .date(let stepDays):
+            if case .date(let y, let m, let d) = v.currentValue {
+                let cal = Calendar.current
+                let comps = DateComponents(year: y, month: m, day: d)
+                let days = delta > 0 ? stepDays : -stepDays
+                if let dt = cal.date(from: comps),
+                   let nextDt = cal.date(byAdding: .day, value: days, to: dt) {
+                    v.currentValue = .date(
+                        year: cal.component(.year, from: nextDt),
+                        month: cal.component(.month, from: nextDt),
+                        day: cal.component(.day, from: nextDt)
+                    )
+                }
+            }
+        }
+        session.variables[idx] = v
+        InteractiveControlEngine.recalculate(session: &session)
+        interactiveSessions[id] = session
+        activeInteractiveSession = session
+        HapticHelper.alignment()
     }
 
     // MARK: - 局部字段快捷取用

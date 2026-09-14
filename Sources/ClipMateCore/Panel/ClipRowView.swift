@@ -55,6 +55,13 @@ public struct ClipRowView: View, Equatable {
     public var onChangeTargetLanguage: ((String) -> Void)? = nil
     public var onMuteAction: ((ContentActionKind) -> Void)? = nil
 
+    public var interactiveSessionBinding: Binding<InteractiveSession>? = nil
+    public var onPasteInteractive: (() -> Void)? = nil
+    public var onCopyInteractive: (() -> Void)? = nil
+    public var onResetInteractive: (() -> Void)? = nil
+    public var onToggleInteractiveLock: ((String) -> Void)? = nil
+    public var onResolveInteractiveMissing: ((Double) -> Void)? = nil
+
     @State private var hovered = false
 
     public init(item: ClipItem, selected: Bool, multiSelected: Bool = false,
@@ -78,7 +85,13 @@ public struct ClipRowView: View, Equatable {
                 onPasteActionResult: (() -> Void)? = nil,
                 onCopyActionResult: (() -> Void)? = nil,
                 onChangeTargetLanguage: ((String) -> Void)? = nil,
-                onMuteAction: ((ContentActionKind) -> Void)? = nil) {
+                onMuteAction: ((ContentActionKind) -> Void)? = nil,
+                interactiveSessionBinding: Binding<InteractiveSession>? = nil,
+                onPasteInteractive: (() -> Void)? = nil,
+                onCopyInteractive: (() -> Void)? = nil,
+                onResetInteractive: (() -> Void)? = nil,
+                onToggleInteractiveLock: ((String) -> Void)? = nil,
+                onResolveInteractiveMissing: ((Double) -> Void)? = nil) {
         self.item = item
         self.selected = selected
         self.multiSelected = multiSelected
@@ -104,6 +117,12 @@ public struct ClipRowView: View, Equatable {
         self.onCopyActionResult = onCopyActionResult
         self.onChangeTargetLanguage = onChangeTargetLanguage
         self.onMuteAction = onMuteAction
+        self.interactiveSessionBinding = interactiveSessionBinding
+        self.onPasteInteractive = onPasteInteractive
+        self.onCopyInteractive = onCopyInteractive
+        self.onResetInteractive = onResetInteractive
+        self.onToggleInteractiveLock = onToggleInteractiveLock
+        self.onResolveInteractiveMissing = onResolveInteractiveMissing
     }
 
     public static func == (lhs: ClipRowView, rhs: ClipRowView) -> Bool {
@@ -124,7 +143,8 @@ public struct ClipRowView: View, Equatable {
         lhs.selectedFieldIndex == rhs.selectedFieldIndex &&
         lhs.isExpanded == rhs.isExpanded &&
         lhs.recommendedAction == rhs.recommendedAction &&
-        lhs.activeActionResult == rhs.activeActionResult
+        lhs.activeActionResult == rhs.activeActionResult &&
+        (lhs.interactiveSessionBinding?.wrappedValue == rhs.interactiveSessionBinding?.wrappedValue)
     }
 
     public var body: some View {
@@ -229,7 +249,18 @@ public struct ClipRowView: View, Equatable {
                 }
 
                 if selected {
-                    if let result = activeActionResult, result.itemID == item.id {
+                    if let sessionBinding = interactiveSessionBinding {
+                        InteractiveControlCard(
+                            session: sessionBinding,
+                            theme: theme,
+                            language: language,
+                            onPaste: { onPasteInteractive?() },
+                            onCopy: { onCopyInteractive?() },
+                            onReset: { onResetInteractive?() },
+                            onToggleLock: { onToggleInteractiveLock?($0) },
+                            onResolveMissing: { onResolveInteractiveMissing?($0) }
+                        )
+                    } else if let result = activeActionResult, result.itemID == item.id {
                         InlineActionResultCard(
                             result: result,
                             theme: theme,
