@@ -262,7 +262,7 @@ final class PanelController {
         }
 
         // ⌥[ / ⌥- 与 ⌥] / ⌥+：调节内容控件主变量（如份数、时间）
-        if optOnly && viewModel.activeInteractiveSession != nil {
+        if optOnly, let session = viewModel.activeInteractiveSession, session.missingConstraint == nil {
             if event.keyCode == 30 || event.keyCode == 24 { // ] 或 =/+
                 viewModel.adjustPrimaryVariable(delta: 1)
                 return true
@@ -362,15 +362,21 @@ final class PanelController {
             return false
         case 30, 24: // ] 或 +
             let isTextViewFocused = (panel.firstResponder is NSTextView)
-            if !isTextViewFocused && viewModel.activeInteractiveSession != nil {
+            if !isTextViewFocused, let session = viewModel.activeInteractiveSession, session.missingConstraint == nil {
                 viewModel.adjustPrimaryVariable(delta: 1)
                 return true
             }
             return false
         case 33, 27: // [ 或 -
             let isTextViewFocused = (panel.firstResponder is NSTextView)
-            if !isTextViewFocused && viewModel.activeInteractiveSession != nil {
+            if !isTextViewFocused, let session = viewModel.activeInteractiveSession, session.missingConstraint == nil {
                 viewModel.adjustPrimaryVariable(delta: -1)
+                return true
+            }
+            return false
+        case 6 where cmdOnly: // ⌘Z 撤销内容控件单步调节
+            if let session = viewModel.activeInteractiveSession, !session.undoStack.isEmpty {
+                viewModel.undoInteractiveSession(itemID: session.itemID)
                 return true
             }
             return false

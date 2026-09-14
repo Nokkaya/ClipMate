@@ -477,12 +477,13 @@ public final class PanelViewModel: ObservableObject {
             activeInteractiveSession = nil
             return
         }
-        if let cached = interactiveSessions[item.id] {
+        if let cached = interactiveSessions[item.id], cached.originalText == item.plainText && cached.contentHash == item.plainText.hashValue {
             activeInteractiveSession = cached
         } else if let session = InteractiveControlEngine.analyze(text: item.plainText, itemID: item.id) {
             interactiveSessions[item.id] = session
             activeInteractiveSession = session
         } else {
+            interactiveSessions.removeValue(forKey: item.id)
             activeInteractiveSession = nil
         }
     }
@@ -505,7 +506,11 @@ public final class PanelViewModel: ObservableObject {
     public func interactiveSession(for item: ClipItem) -> InteractiveSession? {
         guard settings.enableInteractiveClips else { return nil }
         if let cached = interactiveSessions[item.id] {
-            return cached
+            if cached.originalText == item.plainText && cached.contentHash == item.plainText.hashValue {
+                return cached
+            } else {
+                interactiveSessions.removeValue(forKey: item.id)
+            }
         }
         if let session = InteractiveControlEngine.analyze(text: item.plainText, itemID: item.id) {
             interactiveSessions[item.id] = session
@@ -516,6 +521,7 @@ public final class PanelViewModel: ObservableObject {
 
     public func resetInteractiveSession(itemID: Int64) {
         guard var session = interactiveSessions[itemID] else { return }
+        session.pushSnapshot()
         for i in 0..<session.variables.count {
             session.variables[i].currentValue = session.variables[i].baseValue
         }
@@ -531,8 +537,21 @@ public final class PanelViewModel: ObservableObject {
         HapticHelper.alignment()
     }
 
+    public func undoInteractiveSession(itemID: Int64) {
+        guard var session = interactiveSessions[itemID] else { return }
+        if session.undo() {
+            InteractiveControlEngine.recalculate(session: &session)
+            interactiveSessions[itemID] = session
+            if selectedID == itemID {
+                activeInteractiveSession = session
+            }
+            HapticHelper.alignment()
+        }
+    }
+
     public func toggleInteractiveLock(itemID: Int64, dependentID: String) {
         guard var session = interactiveSessions[itemID] else { return }
+        session.pushSnapshot()
         if let idx = session.dependents.firstIndex(where: { $0.id == dependentID }) {
             session.dependents[idx].isLocked.toggle()
             InteractiveControlEngine.recalculate(session: &session)
@@ -546,6 +565,7 @@ public final class PanelViewModel: ObservableObject {
 
     public func resolveMissingConstraint(itemID: Int64, baseValue: Double) {
         guard var session = interactiveSessions[itemID] else { return }
+        session.pushSnapshot()
         session.missingConstraint = nil
         if let idx = session.variables.firstIndex(where: { $0.id == "servings" }) {
             session.variables[idx].baseValue = .number(baseValue)
@@ -594,6 +614,10 @@ public final class PanelViewModel: ObservableObject {
 
     public func adjustPrimaryVariable(delta: Double) {
         guard let id = selectedID, var session = interactiveSessions[id] else { return }
+        if session.missingConstraint != nil {
+            return
+        }
+        session.pushSnapshot()
         guard let prim = session.primaryVariable,
               let idx = session.variables.firstIndex(where: { $0.id == prim.id }) else { return }
         var v = session.variables[idx]

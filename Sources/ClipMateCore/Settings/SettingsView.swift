@@ -973,7 +973,7 @@ private struct CaptureTab: View {
                         if settings.enableInteractiveClips {
                             Divider().overlay(Color.primary.opacity(0.04))
 
-                            SettingsRow("仅在本地分析", subtitle: "使用纯本地轻量规则引擎识别，绝不上传剪贴板历史") {
+                            SettingsRow("仅在本地分析", subtitle: "使用纯本地轻量规则引擎毫秒级识别，无任何网络请求，剪贴板数据完全驻留本机") {
                                 Toggle("", isOn: $settings.interactiveClipsLocalOnly)
                                     .toggleStyle(.switch)
                             }

@@ -13,6 +13,9 @@ public struct InteractiveControlCard: View {
     public var onResolveMissing: (Double) -> Void
 
     @State private var copiedFeedback = false
+    @State private var customMissingInput: String = ""
+    @State private var editingVariableId: String? = nil
+    @State private var editingVariableText: String = ""
 
     public init(session: Binding<InteractiveSession>,
                 theme: AppTheme = .default,
@@ -96,6 +99,21 @@ public struct InteractiveControlCard: View {
             }
 
             Spacer(minLength: 4)
+
+            // 撤销上一调节 (⌘Z)
+            if !session.undoStack.isEmpty {
+                Button(action: {
+                    if session.undo() {
+                        InteractiveControlEngine.recalculate(session: &session)
+                    }
+                }) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 9.5, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("撤销上一调节 (⌘Z)")
+            }
 
             // 重置复原按钮（仅当有修改时展示）
             if session.isModified {
@@ -215,11 +233,31 @@ public struct InteractiveControlCard: View {
                 .buttonStyle(.plain)
                 .disabled(!canDecrement(v))
 
-                // 当前值展示
-                Text(v.currentValue.displayText)
-                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                    .frame(minWidth: 28)
-                    .foregroundStyle(v.isModified ? theme.accent : Color.primary)
+                // 当前值展示（支持直接点击输入）
+                if editingVariableId == v.id {
+                    TextField("", text: $editingVariableText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                        .multilineTextAlignment(.center)
+                        .frame(width: 36)
+                        .onSubmit {
+                            updateVariableDirectly(v.id, text: editingVariableText)
+                            editingVariableId = nil
+                        }
+                } else {
+                    Text(v.currentValue.displayText)
+                        .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                        .frame(minWidth: 28)
+                        .foregroundStyle(v.isModified ? theme.accent : Color.primary)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if case .stepper = v.kind {
+                                editingVariableId = v.id
+                                editingVariableText = "\(Int(v.currentValue.asNumber))"
+                            }
+                        }
+                        .help("点击可直接手动输入数值")
+                }
 
                 // 加按钮
                 Button(action: { incrementVariable(v.id) }) {
@@ -264,6 +302,31 @@ public struct InteractiveControlCard: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                // 自定义数值补齐 (IC-22)
+                HStack(spacing: 2) {
+                    TextField("自定", text: $customMissingInput)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .frame(width: 36)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2.5)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+                        .onSubmit {
+                            if let val = Double(customMissingInput), val > 0 {
+                                onResolveMissing(val)
+                            }
+                        }
+                    if let val = Double(customMissingInput), val > 0 {
+                        Button(action: { onResolveMissing(val) }) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(3)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(theme.accent)
+                    }
+                }
             }
         }
         .padding(8)
@@ -289,22 +352,50 @@ public struct InteractiveControlCard: View {
         .padding(.horizontal, 4)
     }
 
-    // MARK: - 差异预览
+    // MARK: - 差异预览 (IC-23)
 
     private var diffPreviewView: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("调整后预览：")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("改动对比：")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(session.changeSummary)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+            }
 
             ScrollView(.vertical, showsIndicators: true) {
-                Text(session.effectiveText)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
+                VStack(alignment: .leading, spacing: 2) {
+                    let origLines = session.originalText.components(separatedBy: .newlines)
+                    let newLines = session.effectiveText.components(separatedBy: .newlines)
+                    ForEach(0..<max(origLines.count, newLines.count), id: \.self) { idx in
+                        let oLine = idx < origLines.count ? origLines[idx] : nil
+                        let nLine = idx < newLines.count ? newLines[idx] : nil
+                        if let o = oLine, let n = nLine, o != n {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("- " + o)
+                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .foregroundStyle(Color.red.opacity(0.8))
+                                    .strikethrough()
+                                Text("+ " + n)
+                                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(Color.green)
+                            }
+                            .padding(.vertical, 1)
+                            .padding(.horizontal, 4)
+                            .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.04)))
+                        } else if let n = nLine {
+                            Text("  " + n)
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(6)
             }
-            .frame(maxHeight: 120)
+            .frame(maxHeight: 140)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.12)))
         }
     }
@@ -371,6 +462,7 @@ public struct InteractiveControlCard: View {
 
     private func incrementVariable(_ id: String) {
         guard let idx = session.variables.firstIndex(where: { $0.id == id }) else { return }
+        session.pushSnapshot()
         var v = session.variables[idx]
         switch v.kind {
         case .stepper(_, let max, let step, _, _):
@@ -405,6 +497,7 @@ public struct InteractiveControlCard: View {
 
     private func decrementVariable(_ id: String) {
         guard let idx = session.variables.firstIndex(where: { $0.id == id }) else { return }
+        session.pushSnapshot()
         var v = session.variables[idx]
         switch v.kind {
         case .stepper(let min, _, let step, _, _):
@@ -436,6 +529,15 @@ public struct InteractiveControlCard: View {
         }
         session.variables[idx] = v
         InteractiveControlEngine.recalculate(session: &session)
+    }
+
+    private func updateVariableDirectly(_ id: String, text: String) {
+        guard let idx = session.variables.firstIndex(where: { $0.id == id }) else { return }
+        if let num = Double(text) {
+            session.pushSnapshot()
+            session.variables[idx].currentValue = .number(num)
+            InteractiveControlEngine.recalculate(session: &session)
+        }
     }
 
     private func formatNumber(_ num: Double) -> String {

@@ -2514,6 +2514,148 @@ runner.run("Interactive - 日程排期空格连字符及截止时间测试") {
     runner.expectTrue(session.conflicts.contains(where: { $0.message.contains("超时 15 分钟") }), "准确触发截止时间超时 15 分钟警告")
 }
 
+// MARK: - 专项验收 Probes (REVIEW 01 ~ REVIEW 21)
+
+func reviewSession(_ text: String) -> InteractiveSession {
+    guard let session = InteractiveControlEngine.analyze(text: text) else { fatalError("Fixture unexpectedly unrecognized: \(text)") }
+    return session
+}
+func reviewSet(_ session: inout InteractiveSession, _ value: VariableValue, id: String? = nil) {
+    let idx = id.flatMap { id in session.variables.firstIndex { $0.id == id } } ?? 0
+    session.variables[idx].currentValue = value
+    InteractiveControlEngine.recalculate(session: &session)
+}
+func reviewDump(_ name: String, _ session: InteractiveSession) {
+    print("REVIEW EVIDENCE \(name): \(session.adjustedText.replacingOccurrences(of: "\n", with: " | "))")
+    print("VARIABLES: \(session.variables.map { $0.name }); CONFLICTS: \(session.conflicts.map { $0.message })")
+}
+
+runner.run("REVIEW 01: 通用比例不应限定人数和食材单位") {
+    let session = InteractiveControlEngine.analyze(text: "制作 3 套展示架，每套需要 2 米木条和 4 枚螺丝；总用量为木条 6 米、螺丝 12 枚。")
+    runner.expectTrue(session != nil, "明确比例关系应提供套数控件")
+}
+runner.run("REVIEW 02: 一份内容组合数量和日期关系") {
+    let session = reviewSession("单价：20 元\n数量：3 件\n运费：10 元\n总额：70 元\n开始日期：2026-10-01\n第 1 天 (10月1日 周四)：准备\n第 2 天 (10月2日 周五)：交付")
+    runner.expectTrue(session.variables.contains { if case .date = $0.kind { return true }; return false }, "数量与日期控件应可同时存在")
+}
+runner.run("REVIEW 03: 同一基准金额不应改写固定运费") {
+    var s = reviewSession("单价：20 元\n数量：3 件\n运费：70 元\n总额：130 元\n备注：服务包 130 元，单独计费")
+    reviewSet(&s, .number(5)); reviewDump("unrelated amount",s)
+    runner.expectTrue(s.adjustedText.contains("服务包 130 元"), "同额但无关的备注不得跟随总额改变")
+}
+runner.run("REVIEW 04: USD 币种应保留") {
+    var s = reviewSession("单价：20 USD\n数量：3 件\n运费：10 USD\n总额：70 USD")
+    reviewSet(&s, .number(5)); reviewDump("currency",s)
+    runner.expectTrue(s.adjustedText.contains("总额：110 USD"), "不能生成110元USD")
+}
+runner.run("REVIEW 05: 存在未支持折扣时不能悄悄重算总额") {
+    let original = "单价：20 元\n数量：3 件\n运费：10 元\n优惠：10 元\n总额：60 元"
+    let s = reviewSession(original); reviewDump("discount before adjustment",s)
+    runner.expectTrue(s.adjustedText == original || !s.conflicts.isEmpty, "用户未调节前不能忽略优惠改总额且无提示")
+}
+runner.run("REVIEW 06: 调整后锁定应固定当前值") {
+    var s = reviewSession("4人份\n面粉 200 克\n糖 100 克")
+    reviewSet(&s, .number(8))
+    let i = s.dependents.firstIndex { $0.name == "糖" }!
+    s.dependents[i].isLocked = true
+    InteractiveControlEngine.recalculate(session: &s)
+    reviewDump("lock current",s)
+    runner.expectTrue(s.adjustedText.contains("糖 200 克"), "锁定时应保留当前200克")
+    runner.expectTrue(s.zoomLevels[.keyPoints]?.contains("糖：200 克") == s.adjustedText.contains("糖 200 克"), "全文与摘要的锁定值应一致")
+}
+runner.run("REVIEW 07: 同行其他食材不应改写锁定项") {
+    var s = reviewSession("4人份\n糖 100 克\n黄油 100 克\n步骤：混合糖 100 克与黄油 100 克。")
+    s.dependents[s.dependents.firstIndex { $0.name == "糖" }!].isLocked = true
+    reviewSet(&s, .number(8)); reviewDump("locked inline reference",s)
+    runner.expectTrue(s.adjustedText.contains("混合糖 100 克与黄油 200 克"), "糖锁定在步骤中也应生效")
+}
+runner.run("REVIEW 08: 数量替换需要完整数值边界") {
+    var s = reviewSession("4人份\n面粉 40 克\n水 100 毫升\n备注：面粉另备 140 克，不参与配方缩放。")
+    reviewSet(&s, .number(8)); reviewDump("numeric substring",s)
+    runner.expectTrue(s.adjustedText.contains("另备 140 克"), "40克不能匹配到140克内部")
+}
+runner.run("REVIEW 09: 分数范围不能静默遗漏") {
+    var s = reviewSession("4人份\n米 400 克\n水 200 毫升\n糖 1/2 杯\n盐 2-3 克")
+    reviewSet(&s, .number(8)); reviewDump("fraction and range",s)
+    runner.expectTrue((s.adjustedText.contains("糖 1 杯") && s.adjustedText.contains("盐 4-6 克")) || !s.conflicts.isEmpty, "分数和区间应换算或明确提示未处理")
+}
+runner.run("REVIEW 10: 原始高精度数值与替换片段一致") {
+    var s = reviewSession("4人份\n酵母 0.125 克\n面粉 200 克")
+    reviewSet(&s, .number(8)); reviewDump("precision",s)
+    runner.expectTrue(s.adjustedText.contains("酵母 0.25 克"), "0.125克应正确更新为0.25克")
+}
+runner.run("REVIEW 11: 日程应生成可生效的休息控件") {
+    var s = reviewSession("14:00–14:45 分享\n14:45–15:00 休息\n15:00–15:30 讨论")
+    reviewDump("break parsing",s)
+    runner.expectTrue(s.variables.contains { $0.id == "break_duration" }, "必须识别休息时长")
+    s.variables.append(InteractiveVariable(id: "break_duration", name: "休息时长", kind: .duration(stepMinutes: 5, unit: "分钟"), baseValue: .durationMinutes(15), currentValue: .durationMinutes(30), isPrimary: false))
+    InteractiveControlEngine.recalculate(session: &s)
+    runner.expectTrue(s.adjustedText.contains("14:45–15:15 休息") && s.adjustedText.contains("15:15–15:45 讨论"), "即使提供休息变量，计算也应使用其值")
+}
+runner.run("REVIEW 12: 固定日程与重叠检查") {
+    var s = reviewSession("14:00–15:00 分享\n15:00–15:30 固定预约不可改")
+    reviewSet(&s, .time(hour: 14, minute: 30)); reviewDump("fixed schedule",s)
+    runner.expectTrue(s.adjustedText.contains("15:00–15:30 固定预约不可改"), "固定预约不得被顺延")
+    runner.expectFalse(s.conflicts.isEmpty, "应提示与固定预约重叠")
+}
+runner.run("REVIEW 13: 午夜跨日标记") {
+    var s = reviewSession("22:00–22:30 分享\n22:30–23:00 讨论")
+    reviewSet(&s, .time(hour: 23, minute: 45)); reviewDump("midnight",s)
+    runner.expectTrue(s.adjustedText.contains("次日") || s.adjustedText.contains("翌日") || !s.conflicts.isEmpty, "23:45到00:15应显示跨日信息")
+}
+runner.run("REVIEW 14: 支持识别的日期格式也应能替换") {
+    var s = reviewSession("出发日期：2026/10/01\n第 1 天 (10月1日 周四)：抵达\n第 2 天 (10月2日 周五)：参观")
+    reviewSet(&s, .date(year: 2026, month: 10, day: 5)); reviewDump("date format",s)
+    runner.expectFalse(s.adjustedText.contains("2026/10/01"), "日期控件变化后基准日期不能保留旧值")
+}
+runner.run("REVIEW 15: 仅有相对日期应生成具体日期") {
+    var s = reviewSession("开始日期：2026-10-01\n第 1 天：准备\n第 2 天：交付")
+    reviewSet(&s, .date(year: 2026, month: 10, day: 5)); reviewDump("relative dates",s)
+    runner.expectTrue(s.adjustedText.contains("10月6日") || s.adjustedText.contains("2026-10-06"), "第2天应输出新日期及星期")
+}
+runner.run("REVIEW 16: 固定日期脱离行程应提示") {
+    var s = reviewSession("出发日期：2026-10-01\n第 1 天 (10月1日 周四)：抵达\n第 2 天 (10月2日 周五)：参观\n第 3 天 (10月3日 周六)：演出固定门票")
+    reviewSet(&s, .date(year: 2026, month: 10, day: 5)); reviewDump("fixed date conflict",s)
+    runner.expectFalse(s.conflicts.isEmpty, "固定演出在出发前应提示冲突")
+}
+runner.run("REVIEW 17: 超长内容调整不得丢失尾部") {
+    let original = "4人份\n米 400 克\n水 200 毫升\n" + String(repeating: "说明文字", count: 17000) + "尾部必须保留"
+    var s = reviewSession(original)
+    reviewSet(&s, .number(8))
+    print("REVIEW EVIDENCE long text: original=\(original.count), output=\(s.adjustedText.count), tail=\(s.adjustedText.hasSuffix("尾部必须保留"))")
+    runner.expectTrue(s.adjustedText.hasSuffix("尾部必须保留"), "扫描上限不能变成输出截断")
+}
+runner.run("REVIEW 18: 普通会议记录应提供粘贴变焦") {
+    let s = InteractiveControlEngine.analyze(text: "会议记录\n客户希望增加导出功能。\n团队建议先调研，尚未决定是否开发。\n小王周五整理访谈反馈。")
+    runner.expectTrue(s?.zoomLevels[.keyPoints] != nil, "无需人数或排期控件也应有变焦")
+}
+runner.run("REVIEW 19: 变焦输出不能隐藏未解决的冲突") {
+    var s = reviewSession("14:00–14:45 分享\n14:45–15:00 休息\n15:00–15:30 讨论\n必须在 16:45 结束")
+    reviewSet(&s, .time(hour: 15, minute: 30)); s.currentZoom = .oneLine
+    print("REVIEW EVIDENCE zoom: \(s.effectiveText), conflicts=\(s.conflicts.map{$0.message})")
+    runner.expectTrue(s.effectiveText.contains("16:45") || s.effectiveText.contains("超时"), "复制简短输出时应保留固定约束或未解决冲突")
+}
+runner.run("REVIEW 20: 不同内容版本不得复用旧控件会话") {
+    let (store, _) = try makeTempStore()
+    let original = "4人份\n米 400 克\n水 200 毫升"
+    _ = try store.capture(kind: .text, plainText: original, sourceBundle: "com.test", sourceName: "Test")
+    let settings = AppSettings(); settings.enableInteractiveClips = true
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+    var item = store.search(query: "", filter: .all, limit: 1).first!
+    _ = vm.interactiveSession(for: item)
+    item.plainText = "8人份\n米 800 克\n水 400 毫升"
+    runner.expectEqual(vm.interactiveSession(for: item)?.originalText, item.plainText, "相同ID但新版本应重新分析")
+}
+runner.run("REVIEW 21: 缺失基准不能通过快捷键绕过补齐") {
+    let (store, _) = try makeTempStore()
+    _ = try store.capture(kind: .text, plainText: "米 400 克\n水 200 毫升", sourceBundle: "com.test", sourceName: "Test")
+    let settings = AppSettings(); settings.enableInteractiveClips = true
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+    let before = vm.activeInteractiveSession!.adjustedText
+    vm.adjustPrimaryVariable(delta: 1)
+    runner.expectEqual(vm.activeInteractiveSession!.adjustedText, before, "未补齐基准前必须禁止快捷键缩放")
+}
+
 print("----")
 
 

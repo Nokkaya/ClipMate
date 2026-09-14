@@ -90,23 +90,32 @@ public struct DependentBinding: Identifiable, Equatable, Sendable, Codable {
     public var originalFragment: String
     public var baseNumber: Double
     public var currentNumber: Double
+    public var lockedNumber: Double?
+    public var originalLiteral: String
+    public var currency: String?
     public var unit: String
     public var isFixed: Bool
+    public var isFixedInText: Bool
     public var isLocked: Bool
     public var rule: BindingRule
     public var textLocations: [String] // 需替换的原文精准片段
 
     public init(id: String = UUID().uuidString, name: String, originalFragment: String,
-                baseNumber: Double, currentNumber: Double? = nil, unit: String = "",
-                isFixed: Bool = false, isLocked: Bool = false, rule: BindingRule,
-                textLocations: [String] = []) {
+                baseNumber: Double, currentNumber: Double? = nil, lockedNumber: Double? = nil,
+                originalLiteral: String = "", currency: String? = nil, unit: String = "",
+                isFixed: Bool = false, isFixedInText: Bool = false, isLocked: Bool = false,
+                rule: BindingRule, textLocations: [String] = []) {
         self.id = id
         self.name = name
         self.originalFragment = originalFragment
         self.baseNumber = baseNumber
         self.currentNumber = currentNumber ?? baseNumber
+        self.lockedNumber = lockedNumber
+        self.originalLiteral = originalLiteral.isEmpty ? "\(baseNumber)" : originalLiteral
+        self.currency = currency
         self.unit = unit
         self.isFixed = isFixed
+        self.isFixedInText = isFixedInText
         self.isLocked = isLocked
         self.rule = rule
         self.textLocations = textLocations.isEmpty ? [originalFragment] : textLocations
@@ -203,6 +212,21 @@ public enum DetectedPatternType: String, Equatable, Sendable, Codable {
     }
 }
 
+/// 会话单步快照，用于撤销恢复
+public struct InteractiveSessionSnapshot: Equatable, Sendable, Codable {
+    public let variables: [InteractiveVariable]
+    public let dependents: [DependentBinding]
+    public let adjustedText: String
+    public let currentZoom: ZoomLevel
+
+    public init(variables: [InteractiveVariable], dependents: [DependentBinding], adjustedText: String, currentZoom: ZoomLevel) {
+        self.variables = variables
+        self.dependents = dependents
+        self.adjustedText = adjustedText
+        self.currentZoom = currentZoom
+    }
+}
+
 /// 一条剪贴板内容的交互控件会话状态
 public struct InteractiveSession: Equatable, Sendable, Codable {
     public let itemID: Int64
@@ -218,6 +242,8 @@ public struct InteractiveSession: Equatable, Sendable, Codable {
     public var showDiff: Bool
     public var isExpanded: Bool
     public var changeSummary: String
+    public var contentHash: Int
+    public var undoStack: [InteractiveSessionSnapshot]
 
     public init(itemID: Int64, originalText: String, patternType: DetectedPatternType,
                 variables: [InteractiveVariable], dependents: [DependentBinding],
@@ -228,7 +254,9 @@ public struct InteractiveSession: Equatable, Sendable, Codable {
                 currentZoom: ZoomLevel = .full,
                 showDiff: Bool = false,
                 isExpanded: Bool = false,
-                changeSummary: String = "") {
+                changeSummary: String = "",
+                contentHash: Int? = nil,
+                undoStack: [InteractiveSessionSnapshot] = []) {
         self.itemID = itemID
         self.originalText = originalText
         self.patternType = patternType
@@ -242,6 +270,8 @@ public struct InteractiveSession: Equatable, Sendable, Codable {
         self.showDiff = showDiff
         self.isExpanded = isExpanded
         self.changeSummary = changeSummary
+        self.contentHash = contentHash ?? originalText.hashValue
+        self.undoStack = undoStack
     }
 
     public var primaryVariable: InteractiveVariable? {
@@ -265,5 +295,27 @@ public struct InteractiveSession: Equatable, Sendable, Codable {
             return adjustedText
         }
         return zoomLevels[currentZoom] ?? adjustedText
+    }
+
+    public mutating func pushSnapshot() {
+        let snapshot = InteractiveSessionSnapshot(
+            variables: variables,
+            dependents: dependents,
+            adjustedText: adjustedText,
+            currentZoom: currentZoom
+        )
+        undoStack.append(snapshot)
+        if undoStack.count > 20 {
+            undoStack.removeFirst()
+        }
+    }
+
+    public mutating func undo() -> Bool {
+        guard let prev = undoStack.popLast() else { return false }
+        self.variables = prev.variables
+        self.dependents = prev.dependents
+        self.adjustedText = prev.adjustedText
+        self.currentZoom = prev.currentZoom
+        return true
     }
 }
