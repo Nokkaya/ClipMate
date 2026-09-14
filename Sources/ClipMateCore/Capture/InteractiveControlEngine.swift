@@ -262,6 +262,7 @@ public enum InteractiveControlEngine {
             let name: String
             let duration: Int
             let originalStartStr: String
+            let separatorStr: String
             let originalEndStr: String
             let originalRangeStr: String
         }
@@ -276,6 +277,11 @@ public enum InteractiveControlEngine {
             let sStr = String(text[sRange])
             let eStr = String(text[eRange])
             let name = String(text[nRange]).trimmingCharacters(in: .whitespaces)
+
+            let sEndNSRange = match.range(at: 1).location + match.range(at: 1).length
+            let eStartNSRange = match.range(at: 2).location
+            let sepNSRange = NSRange(location: sEndNSRange, length: max(0, eStartNSRange - sEndNSRange))
+            let sepStr = Range(sepNSRange, in: text).map { String(text[$0]) } ?? "–"
 
             guard let sMins = parseTimeMinutes(sStr),
                   let eMins = parseTimeMinutes(eStr) else { continue }
@@ -300,6 +306,7 @@ public enum InteractiveControlEngine {
                     name: name,
                     duration: dur,
                     originalStartStr: sStr,
+                    separatorStr: sepStr,
                     originalEndStr: eStr,
                     originalRangeStr: String(text[fullRange])
                 ))
@@ -311,18 +318,22 @@ public enum InteractiveControlEngine {
         // 构建各环节的依赖项
         for seg in segments {
             let offset = seg.startMinutes - earliestTotalMinutes
+            let sep = seg.separatorStr
+            let exactFrag = "\(seg.originalStartStr)\(sep)\(seg.originalEndStr)"
             let dep = DependentBinding(
                 name: seg.name,
-                originalFragment: "\(seg.originalStartStr)–\(seg.originalEndStr)",
+                originalFragment: exactFrag,
                 baseNumber: Double(seg.startMinutes),
                 unit: "",
                 isFixed: false,
                 isLocked: false,
                 rule: .timeOffset(offsetMinutes: offset, baseTimeVariableId: "start_time", durationMinutes: seg.duration),
                 textLocations: [
+                    exactFrag,
                     "\(seg.originalStartStr)–\(seg.originalEndStr)",
                     "\(seg.originalStartStr)-\(seg.originalEndStr)",
-                    "\(seg.originalStartStr) - \(seg.originalEndStr)"
+                    "\(seg.originalStartStr) - \(seg.originalEndStr)",
+                    "\(seg.originalStartStr) – \(seg.originalEndStr)"
                 ]
             )
             dependents.append(dep)
@@ -583,6 +594,7 @@ public enum InteractiveControlEngine {
             let newStartMins = newH * 60 + newM
 
             var latestEndMinutes = 0
+            var schedLines = updatedText.components(separatedBy: .newlines)
 
             for i in 0..<session.dependents.count {
                 if session.dependents[i].isLocked { continue }
@@ -593,17 +605,79 @@ public enum InteractiveControlEngine {
                     let oldStartMins = (baseStartMins + offset) % (24 * 60)
                     let oldEndMins = (oldStartMins + duration) % (24 * 60)
 
-                    let oldTimeStr = String(format: "%02d:%02d–%02d:%02d", oldStartMins / 60, oldStartMins % 60, oldEndMins / 60, oldEndMins % 60)
-                    let newTimeStr = String(format: "%02d:%02d–%02d:%02d", itemStartMins / 60, itemStartMins % 60, itemEndMins / 60, itemEndMins % 60)
+                    let oldSH = oldStartMins / 60
+                    let oldSM = oldStartMins % 60
+                    let oldEH = oldEndMins / 60
+                    let oldEM = oldEndMins % 60
 
-                    let oldDashStr = String(format: "%02d:%02d-%02d:%02d", oldStartMins / 60, oldStartMins % 60, oldEndMins / 60, oldEndMins % 60)
+                    let newSH = itemStartMins / 60
+                    let newSM = itemStartMins % 60
+                    let newEH = itemEndMins / 60
+                    let newEM = itemEndMins % 60
 
-                    if updatedText.contains(oldTimeStr) {
-                        updatedText = updatedText.replacingOccurrences(of: oldTimeStr, with: newTimeStr)
-                        updatedCount += 1
-                    } else if updatedText.contains(oldDashStr) {
-                        updatedText = updatedText.replacingOccurrences(of: oldDashStr, with: newTimeStr)
-                        updatedCount += 1
+                    let newStartStr = String(format: "%02d:%02d", newSH, newSM)
+                    let newEndStr = String(format: "%02d:%02d", newEH, newEM)
+
+                    let oldStart2 = String(format: "%02d:%02d", oldSH, oldSM)
+                    let oldEnd2 = String(format: "%02d:%02d", oldEH, oldEM)
+                    let oldStart1 = String(format: "%d:%02d", oldSH, oldSM)
+                    let oldEnd1 = String(format: "%d:%02d", oldEH, oldEM)
+
+                    let depName = session.dependents[i].name
+                    var replacedForDep = false
+
+                    // 1. 优先在包含该环节名称的行中执行时间区间替换（保留行内原有分隔符与空格）
+                    for lineIdx in 0..<schedLines.count {
+                        let line = schedLines[lineIdx]
+                        if !depName.isEmpty && line.contains(depName) {
+                            let pat = #"([0-2]?\d:[0-5]\d)(\s*[–\-~至到]\s*)([0-2]?\d:[0-5]\d)"#
+                            if let reg = try? NSRegularExpression(pattern: pat),
+                               let match = reg.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+                               let r1 = Range(match.range(at: 1), in: line),
+                               let rSep = Range(match.range(at: 2), in: line),
+                               let r2 = Range(match.range(at: 3), in: line) {
+                                let matchS = String(line[r1])
+                                let matchSep = String(line[rSep])
+                                let matchE = String(line[r2])
+
+                                if (matchS == oldStart2 || matchS == oldStart1) && (matchE == oldEnd2 || matchE == oldEnd1) {
+                                    let oldFrag = matchS + matchSep + matchE
+                                    let newFrag = newStartStr + matchSep + newEndStr
+                                    schedLines[lineIdx] = line.replacingOccurrences(of: oldFrag, with: newFrag)
+                                    replacedForDep = true
+                                    updatedCount += 1
+                                    break
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. 若未根据环节名称命中，按候选时间片段在各行中进行替换
+                    if !replacedForDep {
+                        let candidateTargets = session.dependents[i].textLocations + [
+                            "\(oldStart2) - \(oldEnd2)",
+                            "\(oldStart2)-\(oldEnd2)",
+                            "\(oldStart2)–\(oldEnd2)",
+                            "\(oldStart1) - \(oldEnd1)",
+                            "\(oldStart1)-\(oldEnd1)",
+                            "\(oldStart1)–\(oldEnd1)"
+                        ]
+
+                        for lineIdx in 0..<schedLines.count {
+                            var line = schedLines[lineIdx]
+                            for target in candidateTargets {
+                                if line.contains(target) {
+                                    let sep = target.contains(" - ") ? " - " : (target.contains("–") ? "–" : (target.contains(" ~ ") ? " ~ " : "-"))
+                                    let newFrag = newStartStr + sep + newEndStr
+                                    line = line.replacingOccurrences(of: target, with: newFrag)
+                                    schedLines[lineIdx] = line
+                                    replacedForDep = true
+                                    updatedCount += 1
+                                    break
+                                }
+                            }
+                            if replacedForDep { break }
+                        }
                     }
 
                     let endM = itemStartMins + duration
@@ -613,19 +687,30 @@ public enum InteractiveControlEngine {
                 }
             }
 
-            // 检查固定截止时间冲突：例如 "必须在 16:45 结束"
-            let deadlinePat = #"(?:必须在|最晚|需在|前结束)?\s*([0-2]?\d:[0-5]\d)\s*(?:前结束|结束|清场)"#
-            if let dRegex = try? NSRegularExpression(pattern: deadlinePat),
-               let match = dRegex.firstMatch(in: session.originalText, range: NSRange(session.originalText.startIndex..., in: session.originalText)),
-               let r = Range(match.range(at: 1), in: session.originalText),
-               let deadMins = parseTimeMinutes(String(session.originalText[r])) {
-                if latestEndMinutes > deadMins {
-                    let overtime = latestEndMinutes - deadMins
-                    conflicts.append(InteractiveConflict(
-                        id: "schedule_overtime",
-                        message: "必须在 \(String(session.originalText[r])) 结束，调整后已超时 \(overtime) 分钟",
-                        severity: .warning
-                    ))
+            updatedText = schedLines.joined(separator: "\n")
+
+            // 检查固定截止时间冲突（如 "截止时间：16:30"、"最晚 16:30"、"16:30 前结束"）
+            let deadlinePatterns = [
+                #"(?i)(?:必须在|最晚|需在|截止时间|截止|ddl|deadline)\s*[:：]?\s*([0-2]?\d:[0-5]\d)"#,
+                #"(?i)([0-2]?\d:[0-5]\d)\s*(?:前结束|结束|清场|前离场|前完成)"#
+            ]
+
+            for pat in deadlinePatterns {
+                if let dRegex = try? NSRegularExpression(pattern: pat),
+                   let match = dRegex.firstMatch(in: session.originalText, range: NSRange(session.originalText.startIndex..., in: session.originalText)) {
+                    let groupIdx = match.range(at: 1).location != NSNotFound ? 1 : 2
+                    if let r = Range(match.range(at: groupIdx), in: session.originalText),
+                       let deadMins = parseTimeMinutes(String(session.originalText[r])) {
+                        if latestEndMinutes > deadMins {
+                            let overtime = latestEndMinutes - deadMins
+                            conflicts.append(InteractiveConflict(
+                                id: "schedule_overtime",
+                                message: "截止时间为 \(String(session.originalText[r]))，调整后日程已超时 \(overtime) 分钟",
+                                severity: .warning
+                            ))
+                        }
+                        break
+                    }
                 }
             }
 

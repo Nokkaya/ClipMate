@@ -196,7 +196,9 @@ struct PreviewOverlay: View {
         case .url:
             urlSection(item)
         default:
-            if item.tags.contains("JSON") || ((item.plainText.hasPrefix("{") || item.plainText.hasPrefix("[")) && SyntaxHighlighter.formatJSON(item.plainText) != nil) {
+            if viewModel.interactiveSession(for: item) != nil {
+                defaultTextSection(item)
+            } else if item.tags.contains("JSON") || ((item.plainText.hasPrefix("{") || item.plainText.hasPrefix("[")) && SyntaxHighlighter.formatJSON(item.plainText) != nil) {
                 jsonSection(item)
             } else if item.tags.contains("代码") || AutoTagger.isCode(item.plainText) {
                 codeSection(item)

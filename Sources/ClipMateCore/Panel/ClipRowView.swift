@@ -195,13 +195,16 @@ public struct ClipRowView: View, Equatable {
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                 } else {
+                    let textToDisplay = (interactiveSessionBinding?.wrappedValue.isModified == true)
+                        ? (interactiveSessionBinding?.wrappedValue.effectiveText ?? item.displayText)
+                        : item.displayText
                     if !searchHighlight.isEmpty {
-                        Text(TextHighlighter.highlight(text: item.displayText, query: searchHighlight))
+                        Text(TextHighlighter.highlight(text: textToDisplay, query: searchHighlight))
                             .font(.system(size: 13))
                             .lineLimit(2)
                             .foregroundStyle(item.kind == .image ? .secondary : .primary)
                     } else {
-                        Text(item.displayText)
+                        Text(textToDisplay)
                             .font(.system(size: 13))
                             .lineLimit(2)
                             .foregroundStyle(item.kind == .image ? .secondary : .primary)

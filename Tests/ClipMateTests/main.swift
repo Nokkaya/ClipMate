@@ -2477,6 +2477,43 @@ runner.run("Interactive - Phase 5: PanelViewModel 状态保持、复位与复制
     runner.expectFalse(vm.activeInteractiveSession?.isModified == true, "会话状态还原为未修改")
 }
 
+runner.run("Interactive - 日程排期空格连字符及截止时间测试") {
+    let text = """
+    产品发布评审日程
+    - 14:00 - 15:00 产品功能演示
+    - 15:00 - 15:30 技术架构评审
+    - 15:30 - 16:00 待办事项汇总
+    截止时间：16:30
+    """
+
+    guard var session = InteractiveControlEngine.analyze(text: text, itemID: 9999) else {
+        runner.expectTrue(false, "应成功识别排期日程")
+        return
+    }
+
+    runner.expectEqual(session.patternType, .schedule, "识别为 schedule")
+    runner.expectEqual(session.primaryVariable?.baseValue.displayText, "14:00", "初始时间 14:00")
+
+    // 推迟 30 分钟至 14:30
+    if let idx = session.variables.firstIndex(where: { $0.id == "start_time" }) {
+        session.variables[idx].currentValue = .time(hour: 14, minute: 30)
+    }
+    InteractiveControlEngine.recalculate(session: &session)
+
+    runner.expectTrue(session.adjustedText.contains("14:30 - 15:30 产品功能演示"), "第一环节更新为 14:30 - 15:30")
+    runner.expectTrue(session.adjustedText.contains("15:30 - 16:00 技术架构评审"), "第二环节更新为 15:30 - 16:00")
+    runner.expectTrue(session.adjustedText.contains("16:00 - 16:30 待办事项汇总"), "第三环节更新为 16:00 - 16:30")
+    runner.expectTrue(session.conflicts.isEmpty, "16:30 结束未超出截止时间")
+
+    // 再推迟 15 分钟至 14:45，结束时间为 16:45，超过截止时间 16:30
+    if let idx = session.variables.firstIndex(where: { $0.id == "start_time" }) {
+        session.variables[idx].currentValue = .time(hour: 14, minute: 45)
+    }
+    InteractiveControlEngine.recalculate(session: &session)
+    runner.expectTrue(session.adjustedText.contains("16:15 - 16:45 待办事项汇总"), "第三环节顺延至 16:45")
+    runner.expectTrue(session.conflicts.contains(where: { $0.message.contains("超时 15 分钟") }), "准确触发截止时间超时 15 分钟警告")
+}
+
 print("----")
 
 
