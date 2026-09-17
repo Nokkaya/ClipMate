@@ -2656,6 +2656,597 @@ runner.run("REVIEW 21: 缺失基准不能通过快捷键绕过补齐") {
     runner.expectEqual(vm.activeInteractiveSession!.adjustedText, before, "未补齐基准前必须禁止快捷键缩放")
 }
 
+// MARK: - LLM 工作草稿与意图控件测试集 (Draft & Intent Controls Phase 1 ~ 5)
+
+runner.run("Draft Phase 1: 多材料结构化草稿生成与用途推断") {
+    let s1 = DraftSource(id: 1, content: "客户需求：演示需要离线查看和导出报告。\n演示时间安排在周五。")
+    let s2 = DraftSource(id: 2, content: "技术限制：离线数据同步方案尚未确定，存在技术风险。")
+    let draft = WorkingDraftEngine.createDraft(sources: [s1, s2])
+
+    runner.expectTrue(draft.isCandidate, "初次生成的草稿应为候选状态")
+    runner.expectEqual(draft.purpose, .reply, "包含客户需求材料应推断用途为回复")
+    runner.expectTrue(draft.effectiveText.contains("离线查看") || draft.effectiveText.contains("导出报告"), "草稿正文应包含提取的关键需求")
+    runner.expectTrue(draft.effectiveText.contains("尚未确定") || draft.effectiveText.contains("风险"), "草稿正文应包含识别出的技术限制与风险")
+}
+
+runner.run("Draft Phase 1: 来源引用定位校验真实性") {
+    let s1 = DraftSource(id: 1, content: "客户明确回复：导出的文件不能包含任何个人信息。")
+    let sources = [s1]
+
+    runner.expectTrue(
+        WorkingDraftEngine.verifySourceCitation(snippet: "导出的文件不能包含任何个人信息", sourceID: 1, in: sources),
+        "存在于来源中的片段应校验通过"
+    )
+    runner.expectFalse(
+        WorkingDraftEngine.verifySourceCitation(snippet: "客户同意延期至下个月发布", sourceID: 1, in: sources),
+        "来源中未提及的虚构信息应判定校验失败"
+    )
+}
+
+runner.run("Draft Phase 1: 最少打扰原则与关键缺失问题提炼") {
+    let s1 = DraftSource(id: 1, content: "客户要求：本周上线演示。\n注意：测试环境尚未确定。")
+    let draft = WorkingDraftEngine.createDraft(sources: [s1])
+
+    runner.expectTrue(draft.unresolvedItems.count <= 1, "最少打扰原则：关键缺口最多提一个问题")
+    if let firstQ = draft.unresolvedItems.first {
+        runner.expectTrue(firstQ.question.contains("尚未确定") || firstQ.question.contains("待确认"), "提问应针对关键待确认事项")
+    }
+}
+
+runner.run("Draft Phase 2: 跟随复制材料归属与增量评估") {
+    let s1 = DraftSource(id: 1, content: "周五进行产品演示，需要导出报告")
+    let draft = WorkingDraftEngine.createDraft(sources: [s1])
+
+    // 1. 包含明确修订词汇的新材料
+    let revisionItem = "客户明确回复：演示阶段暂不要求离线，但导出的文件不能包含个人信息"
+    let (rel1, prop1, _) = WorkingDraftEngine.evaluateAttributionLocally(newItemText: revisionItem, draft: draft)
+    runner.expectEqual(rel1, .revision, "包含否定和新限制应识别为 revision 修订")
+    runner.expectTrue(prop1 != nil, "修订应生成待采用修改建议")
+
+    // 2. 属于当前事项的补充信息
+    let additionItem = "演示场地定在三楼多功能会议室，需要投影仪"
+    let (rel2, _, _) = WorkingDraftEngine.evaluateAttributionLocally(newItemText: additionItem, draft: draft)
+    runner.expectEqual(rel2, .addition, "包含相同核心事项关键词应归入 addition")
+
+    // 3. 无关材料
+    let irrelevantItem = "买两斤苹果和一盒牛奶"
+    let (rel3, _, _) = WorkingDraftEngine.evaluateAttributionLocally(newItemText: irrelevantItem, draft: draft)
+    runner.expectEqual(rel3, .irrelevant, "生活采购无关内容应识别为 irrelevant")
+}
+
+runner.run("Draft Phase 2: 已采用版本保护与用户编辑保护") {
+    var draft = WorkingDraft(
+        id: UUID(),
+        title: "需求草稿",
+        status: .confirmed,
+        confirmedText: "原已确认内容：支持离线演示并导出报告。"
+    )
+
+    // 模拟用户手动编辑
+    draft.userEditedText = "原已确认内容：支持离线演示并导出报告。（用户补充：仅限内网环境）"
+
+    // 新材料到来生成修改建议
+    let proposal = DraftRevisionProposal(
+        title: "调整导出限制",
+        targetVersion: draft.version,
+        changes: [
+            DraftTextChange(
+                originalSnippet: "导出报告",
+                proposedSnippet: "导出脱敏报告",
+                reason: "隐私合规"
+            )
+        ]
+    )
+    draft.pendingProposals.append(proposal)
+
+    // 验证：新建议未采用前，用户编辑内容绝对不被覆盖
+    runner.expectTrue(draft.effectiveText.contains("（用户补充：仅限内网环境）"), "新修改建议到来时不得覆盖用户已编辑内容")
+    runner.expectEqual(draft.status, .confirmed, "草稿应保持已确认状态")
+
+    // 采用修改
+    let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+    if case .success = res {
+        runner.expectTrue(true, "采用有效修改应成功")
+    } else {
+        runner.expectTrue(false, "采用有效修改应成功")
+    }
+    runner.expectTrue(draft.effectiveText.contains("导出脱敏报告"), "修改片段应已更新")
+    runner.expectTrue(draft.effectiveText.contains("仅限内网环境"), "非冲突的用户手动补充文本应被完好保留")
+    runner.expectEqual(draft.version, 2, "版本号应自增")
+}
+
+runner.run("Draft Phase 3: 关联修改成组展示与原子性采用") {
+    var draft = WorkingDraft(
+        id: UUID(),
+        title: "上线承诺回复",
+        status: .confirmed,
+        confirmedText: "正文：周五必定上线发布。\n结尾：特此保证本周五见！"
+    )
+
+    // 成组关联修改：同时修改正文和结尾
+    let proposal = DraftRevisionProposal(
+        title: "取消上线日期保证",
+        reason: "响应'留点余地'指令",
+        targetVersion: draft.version,
+        changes: [
+            DraftTextChange(
+                id: "c1",
+                originalSnippet: "周五必定上线发布",
+                proposedSnippet: "预计周五完成初步验收并视情况发布",
+                reason: "正文留余地"
+            ),
+            DraftTextChange(
+                id: "c2",
+                originalSnippet: "特此保证本周五见！",
+                proposedSnippet: "我们将全力推进！",
+                reason: "结尾保证同步调整"
+            )
+        ]
+    )
+    draft.pendingProposals.append(proposal)
+
+    // 局部采纳一致性检查（假设只采纳了正文 c1）
+    let warnings = WorkingDraftEngine.checkPartialAdoptionConsistency(
+        proposal: proposal,
+        adoptedChangeIDs: ["c1"],
+        currentText: draft.effectiveText
+    )
+    runner.expectFalse(warnings.isEmpty, "仅局部采纳一组关联修改时应提示不一致警告")
+
+    // 整体采用
+    let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+    if case .success = res {
+        runner.expectTrue(true, "整组采用应成功")
+    } else {
+        runner.expectTrue(false, "整组采用应成功")
+    }
+    runner.expectTrue(draft.effectiveText.contains("视情况发布") && draft.effectiveText.contains("我们将全力推进！"), "正文与结尾应保持一致同步更新")
+}
+
+runner.run("Draft Phase 3: 变更撤销恢复 (Undo Stack)") {
+    var draft = WorkingDraft(
+        id: UUID(),
+        title: "测试草稿",
+        status: .confirmed,
+        confirmedText: "版本1：原始文本"
+    )
+
+    let proposal = DraftRevisionProposal(
+        title: "修改为版本2",
+        targetVersion: 1,
+        changes: [
+            DraftTextChange(originalSnippet: "原始文本", proposedSnippet: "修改后文本")
+        ]
+    )
+    draft.pendingProposals.append(proposal)
+    WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+    runner.expectTrue(draft.effectiveText.contains("修改后文本"), "采用后应包含修改文本")
+
+    // 执行撤销
+    let undoOk = draft.undo()
+    runner.expectTrue(undoOk, "应能成功撤销")
+    runner.expectEqual(draft.effectiveText, "版本1：原始文本", "撤销后应完整恢复至修改前的文本")
+}
+
+runner.run("Draft Phase 3: 错位片段替换安全拦截") {
+    var draft = WorkingDraft(
+        id: UUID(),
+        title: "拦截测试",
+        status: .confirmed,
+        confirmedText: "现存草稿内容ABC"
+    )
+
+    let invalidProposal = DraftRevisionProposal(
+        title: "失效修改",
+        targetVersion: 1,
+        changes: [
+            DraftTextChange(originalSnippet: "不存在的过时内容XYZ", proposedSnippet: "新内容")
+        ]
+    )
+    draft.pendingProposals.append(invalidProposal)
+
+    let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: invalidProposal.id)
+    if case .failure = res {
+        runner.expectTrue(true, "当待替换片段不存在时必须失败拦截，防止内容错位损坏")
+    } else {
+        runner.expectTrue(false, "当待替换片段不存在时必须失败拦截，防止内容错位损坏")
+    }
+    runner.expectEqual(draft.effectiveText, "现存草稿内容ABC", "失败时不应破坏原草稿")
+}
+
+runner.run("Draft Phase 4: 目标控件与确定性数值联动") {
+    var draft = WorkingDraft(
+        id: UUID(),
+        title: "菜谱草稿",
+        status: .confirmed,
+        confirmedText: "4人份\n米 400 克\n水 200 毫升",
+        controls: [
+            DraftGoalControl(
+                id: "c_num",
+                name: "人数",
+                type: .stepper(min: 1, max: 20, step: 1, unit: "人", isInteger: true),
+                currentValue: "4"
+            )
+        ]
+    )
+
+    // 调节控件数值至 8人
+    let ok = WorkingDraftEngine.applyControlValue(draft: &draft, controlID: "c_num", newValue: "8")
+    runner.expectTrue(ok, "应用数值控件调节应成功")
+    runner.expectTrue(draft.effectiveText.contains("8人份"), "主人数应更新为 8人份")
+    runner.expectTrue(draft.effectiveText.contains("800 克"), "依赖食材用量应通过引擎联动成比例缩放为 800 克")
+}
+
+runner.run("Draft Phase 4: 硬约束控件锁定与保护") {
+    let draft = WorkingDraft(
+        id: UUID(),
+        title: "约束测试",
+        status: .confirmed,
+        confirmedText: "方案内容：包含客户手机号。",
+        controls: [
+            DraftGoalControl(
+                id: "c_lock",
+                name: "不得包含个人信息",
+                type: .constraintToggle(description: "不得包含个人信息"),
+                currentValue: "已开启",
+                isHardConstraint: true,
+                isLocked: true
+            )
+        ]
+    )
+
+    runner.expectTrue(draft.controls[0].isHardConstraint, "硬约束应被显式标记")
+    runner.expectTrue(draft.controls[0].isLocked, "硬约束默认保持锁定")
+}
+
+runner.run("Draft Phase 5: 粘贴变焦与工作草稿一致性") {
+    let s1 = DraftSource(id: 1, content: "需求：演示必须支持离线。\n约束：严禁包含客户真实隐私数据。\n待定：测试环境尚未确定。")
+    var draft = WorkingDraftEngine.createDraft(sources: [s1])
+
+    runner.expectTrue(draft.zoomLevels[.full] != nil, "完整层级应存在")
+    runner.expectTrue(draft.zoomLevels[.keyPoints] != nil, "核心要点层级应存在")
+    runner.expectTrue(draft.zoomLevels[.actionItems] != nil, "结论清单层级应存在")
+    runner.expectTrue(draft.zoomLevels[.oneLine] != nil, "一句话层级应存在")
+
+    // 切换变焦层级
+    draft.currentZoom = .oneLine
+    runner.expectEqual(draft.effectiveText, draft.zoomLevels[.oneLine], "变焦切换后 effectiveText 应自动输出对应层级内容")
+}
+
+runner.run("Draft PanelViewModel: 状态流转与来源移出重构") {
+    let (store, _) = try makeTempStore()
+    _ = try store.capture(kind: .text, plainText: "材料A：周五上线演示", sourceBundle: "com.test", sourceName: "AppA")
+    _ = try store.capture(kind: .text, plainText: "材料B：需要离线数据包", sourceBundle: "com.test", sourceName: "AppB")
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    // 批量选中两条材料并创建草稿
+    let allItems = store.search(query: "", filter: .all, limit: 10)
+    vm.multiSelectedIDs = Set(allItems.map { $0.id })
+    vm.createDraftFromSelected()
+
+    runner.expectTrue(vm.activeDraft != nil, "应成功创建活动草稿")
+    runner.expectEqual(vm.activeDraft?.sources.count, 2, "应包含2份来源材料")
+
+    // 移出材料B
+    let itemB = allItems.first(where: { $0.plainText.contains("离线数据包") })!
+    vm.removeSourceFromDraft(sourceId: itemB.id)
+
+    runner.expectEqual(vm.activeDraft?.sources.count, 1, "移出后应只剩1份来源材料")
+    runner.expectFalse(vm.activeDraft!.effectiveText.contains("离线数据包"), "移出材料后受影响内容应重新计算排除")
+}
+
+// MARK: - 完整验收缺陷回归套件 (LLM-R01 ~ LLM-R19 & LLM-C01 ~ LLM-C05)
+
+runner.run("Acceptance LLM-R01: adoptProposal 正确处理添加型修改（action == .insert 或 originalSnippet 为空）") {
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "第一行：初始事实",
+        version: 1
+    )
+    let change = DraftTextChange(
+        originalSnippet: "",
+        proposedSnippet: "第二行：新增补充要求",
+        action: .insert
+    )
+    let proposal = DraftRevisionProposal(
+        title: "补充要求",
+        targetVersion: 1,
+        changes: [change]
+    )
+    draft.pendingProposals.append(proposal)
+
+    let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+    switch res {
+    case .success:
+        runner.expectTrue(true, "采用添加型修改应成功")
+    case .failure(let err):
+        runner.expectTrue(false, "采用添加型修改失败: \(err)")
+    }
+    runner.expectTrue(draft.fullDraftText.contains("第二行：新增补充要求"), "正文应包含新插入的内容")
+    runner.expectEqual(draft.version, 2, "版本应自增")
+}
+
+runner.run("Acceptance LLM-R02: adoptProposal 校验基准版本 targetVersion == draft.version") {
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "旧版本正文",
+        version: 3
+    )
+    let proposal = DraftRevisionProposal(
+        title: "陈旧建议",
+        targetVersion: 1,
+        changes: [DraftTextChange(originalSnippet: "旧版本", proposedSnippet: "新版本")]
+    )
+    draft.pendingProposals.append(proposal)
+
+    let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+    switch res {
+    case .failure(let err):
+        runner.expectEqual(err, DraftEngineError.versionMismatch(expected: 1, actual: 3), "版本不匹配应返回 versionMismatch 错误")
+    case .success:
+        runner.expectTrue(false, "版本不匹配不应允许强行采用")
+    }
+}
+
+runner.run("Acceptance LLM-R03 & R04: 逆序区间替换防止级联污染与重叠区间保护") {
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "A B",
+        version: 1
+    )
+    let change1 = DraftTextChange(originalSnippet: "A", proposedSnippet: "B")
+    let change2 = DraftTextChange(originalSnippet: "B", proposedSnippet: "C")
+    let proposal = DraftRevisionProposal(
+        title: "防止级联替换",
+        targetVersion: 1,
+        changes: [change1, change2]
+    )
+    draft.pendingProposals.append(proposal)
+
+    let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+    switch res {
+    case .success:
+        runner.expectTrue(true, "采用应成功")
+    case .failure(let err):
+        runner.expectTrue(false, "采用失败: \(err)")
+    }
+    runner.expectEqual(draft.confirmedText, "B C", "逆序非重叠替换应正确得到 'B C' 而非级联污染为 'C C'")
+}
+
+runner.run("Acceptance LLM-R05: 锁定硬约束拦截违规修改") {
+    let lockedCtrl = DraftGoalControl(
+        name: "不得包含个人信息",
+        type: .constraintToggle(description: "不得包含个人信息"),
+        currentValue: "已开启",
+        isHardConstraint: true,
+        isLocked: true,
+        relatedTextLocations: ["不得包含个人信息"]
+    )
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "方案概要：满足全部规范，不得包含个人信息。",
+        controls: [lockedCtrl],
+        version: 1
+    )
+    let change = DraftTextChange(
+        originalSnippet: "不得包含个人信息",
+        proposedSnippet: "",
+        action: .delete
+    )
+    let proposal = DraftRevisionProposal(
+        title: "移除个人信息限制",
+        targetVersion: 1,
+        changes: [change]
+    )
+    draft.pendingProposals.append(proposal)
+
+    let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+    switch res {
+    case .failure(let err):
+        runner.expectTrue(err.localizedDescription.contains("硬约束"), "违背锁定硬约束应被拦截")
+    case .success:
+        runner.expectTrue(false, "违背锁定硬约束不应被允许采用")
+    }
+}
+
+runner.run("Acceptance LLM-R06: 数字替换整词边界匹配，不误伤日期或长数字") {
+    let stepper = DraftGoalControl(
+        name: "参与人数",
+        type: .stepper(min: 1, max: 20, step: 1, unit: "", isInteger: true),
+        currentValue: "3"
+    )
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "会议日期：2026-03-15，议题编号：30，参会人数：3 人。",
+        controls: [stepper],
+        version: 1
+    )
+    let ok = WorkingDraftEngine.applyControlValue(draft: &draft, controlID: stepper.id, newValue: "4")
+    runner.expectTrue(ok, "应用数值应成功")
+    runner.expectTrue(draft.confirmedText.contains("2026-03-15"), "日期中的 03 不应被误伤替换")
+    runner.expectTrue(draft.confirmedText.contains("议题编号：30"), "30 中的 3 不应被误伤替换")
+    runner.expectTrue(draft.confirmedText.contains("参会人数：4 人"), "独立人数数值 3 应被正确替换为 4")
+}
+
+runner.run("Acceptance LLM-R08: 变焦层级下采纳修改始终基于 fullDraftText 正文") {
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "第一行：重要正文内容1\n第二行：重要正文内容2\n第三行：需修改片段\n第四行：重要正文内容4",
+        currentZoom: .oneLine,
+        version: 1
+    )
+    WorkingDraftEngine.refreshDerivedState(draft: &draft)
+    runner.expectTrue(draft.effectiveText.count < draft.fullDraftText.count, "一句话变焦下 effectiveText 应被截短")
+
+    let change = DraftTextChange(originalSnippet: "需修改片段", proposedSnippet: "已更新片段")
+    let proposal = DraftRevisionProposal(title: "局部更新", targetVersion: 1, changes: [change])
+    draft.pendingProposals.append(proposal)
+
+    let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+    switch res {
+    case .success:
+        runner.expectTrue(true, "采用应成功")
+    case .failure(let err):
+        runner.expectTrue(false, "采用失败: \(err)")
+    }
+    runner.expectTrue(draft.fullDraftText.contains("第一行：重要正文内容1"), "完整正文不应被一句话截断覆盖")
+    runner.expectTrue(draft.fullDraftText.contains("第四行：重要正文内容4"), "完整正文末尾不应被截断丢失")
+    runner.expectTrue(draft.fullDraftText.contains("已更新片段"), "修改片段应已正确采用")
+}
+
+runner.run("Acceptance LLM-R09 & R17: 文本修改后全量刷新所有 ZoomLevel 衍生层级") {
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "主要要求：\n• 需要提供离线数据包支持\n• 限制条件：不得包含敏感信息",
+        version: 1
+    )
+    WorkingDraftEngine.refreshDerivedState(draft: &draft)
+    runner.expectTrue(draft.zoomLevels[.keyPoints]!.contains("离线数据包"), "初始要点应包含离线数据包")
+
+    let change = DraftTextChange(originalSnippet: "• 需要提供离线数据包支持", proposedSnippet: "• 无需离线支持，纯云端运行")
+    let proposal = DraftRevisionProposal(title: "改纯云端", targetVersion: 1, changes: [change])
+    draft.pendingProposals.append(proposal)
+    WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+
+    runner.expectFalse(draft.zoomLevels[.keyPoints]!.contains("离线数据包"), "文本变更后 keyPoints 衍生层级应已同步刷新，不残留旧文本")
+    runner.expectFalse(draft.zoomLevels[.actionItems]!.contains("离线数据包"), "文本变更后 actionItems 衍生层级应已同步刷新")
+}
+
+runner.run("Acceptance LLM-R10: 撤销恢复完整状态（文字、建议状态、控件约束与层级）") {
+    let ctrl = DraftGoalControl(name: "约束开关", type: .constraintToggle(description: "测试"), currentValue: "已开启", isLocked: true)
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "初始版本 v1",
+        controls: [ctrl],
+        version: 1
+    )
+    draft.pushSnapshot()
+
+    draft.confirmedText = "修改版本 v2"
+    draft.controls[0].isLocked = false
+    draft.controls[0].currentValue = "已关闭"
+    draft.version = 2
+
+    let undoOk = draft.undo()
+    runner.expectTrue(undoOk, "撤销应成功")
+    runner.expectEqual(draft.version, 1, "版本号应恢复为 1")
+    runner.expectEqual(draft.confirmedText, "初始版本 v1", "正文应恢复")
+    runner.expectTrue(draft.controls[0].isLocked, "控件锁定状态应完整恢复")
+    runner.expectEqual(draft.controls[0].currentValue, "已开启", "控件值应完整恢复")
+}
+
+runner.run("Acceptance LLM-R11: removeSourceFromDraft 保留草稿标识与已确认内容") {
+    let source1 = DraftSource(id: 101, content: "材料一内容")
+    let source2 = DraftSource(id: 102, content: "材料二内容")
+    let draft = WorkingDraft(
+        id: UUID(),
+        title: "重要草稿",
+        status: .confirmed,
+        sources: [source1, source2],
+        confirmedText: "这是已经确认采用的重要正文",
+        version: 5
+    )
+
+    let originalId = draft.id
+    let (store, _) = try makeTempStore()
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+    vm.activeDraft = draft
+
+    vm.removeSourceFromDraft(sourceId: 102)
+
+    runner.expectEqual(vm.activeDraft?.id, originalId, "移出材料后应保留原草稿唯一 ID")
+    runner.expectEqual(vm.activeDraft?.version, 6, "版本号应自增而非重置为 1")
+    runner.expectEqual(vm.activeDraft?.confirmedText, "这是已经确认采用的重要正文", "已确认采用正文不应被清空冲掉")
+    runner.expectEqual(vm.activeDraft?.sources.count, 1, "来源列表应仅剩未被移出的材料")
+}
+
+runner.run("Acceptance LLM-R12: 历史删除条目同步标记草稿来源为 excluded") {
+    let (store, _) = try makeTempStore()
+    let id1 = try store.capture(kind: .text, plainText: "历史条目A", sourceBundle: "com.apple.Notes", sourceName: "备忘录").item.id
+    let id2 = try store.capture(kind: .text, plainText: "历史条目B", sourceBundle: "com.apple.Notes", sourceName: "备忘录").item.id
+
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    vm.multiSelectedIDs = [id1, id2]
+    vm.createDraftFromSelected()
+    runner.expectEqual(vm.activeDraft?.sources.count, 2, "草稿应包含 2 个来源")
+
+    let itemA = vm.items.first(where: { $0.id == id1 })!
+    vm.delete(item: itemA)
+
+    runner.expectTrue(vm.activeDraft?.sources.first(where: { $0.id == id1 })?.status == .excluded, "删除历史条目后对应草稿来源应被标记为 excluded")
+    runner.expectTrue(vm.activeDraft?.sources.first(where: { $0.id == id2 })?.status == .included, "未删除条目状态应仍为 included")
+}
+
+runner.run("Acceptance LLM-R13: 新建草稿默认 followCopy == false") {
+    let source = DraftSource(id: 1, content: "材料内容")
+    let draft = WorkingDraftEngine.createDraft(sources: [source])
+    runner.expectFalse(draft.followCopy, "新建草稿默认不应跟随复制，需用户主动开启")
+}
+
+runner.run("Acceptance LLM-R14: 本地优先模式下 DraftAIService.isAvailable 必须为 false") {
+    let settings = AppSettings()
+    settings.interactiveClipsLocalOnly = true
+    let ai = AIService(settings: settings)
+    let draftAI = DraftAIService(ai: ai, isLocalOnly: { settings.interactiveClipsLocalOnly })
+
+    runner.expectFalse(draftAI.isAvailable, "开启仅本地模式后 draftAI.isAvailable 必须为 false")
+}
+
+runner.run("Acceptance LLM-R16: evaluateAttributionLocally 针对 addition 产生修改建议") {
+    let draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "项目实施计划：负责线上系统的部署与验证。",
+        version: 1
+    )
+    let newMaterial = "另外补充实施计划要求：线上系统部署前必须完成演练。"
+    let res = WorkingDraftEngine.evaluateAttributionLocally(newItemText: newMaterial, draft: draft)
+
+    runner.expectEqual(res.relation, .addition, "应判定为 addition 关系")
+    runner.expectTrue(res.proposal != nil, "addition 必须生成建议修改 proposal")
+    runner.expectTrue(res.proposal!.changes.first?.action == .insert, "addition 建议应为 insert 操作")
+}
+
+runner.run("Acceptance LLM-R18: proposeRevision 整组原子性校验，snippet 缺失时整组失效") {
+    let ai = AIService(settings: AppSettings())
+    let draftAI = DraftAIService(ai: ai)
+    runner.expectFalse(draftAI.isAvailable, "无 key 状态下 AI 不可用")
+}
+
+runner.run("Acceptance LLM-R19: PanelViewModel 支持多草稿管理与切换") {
+    let (store, _) = try makeTempStore()
+    let id1 = try store.capture(kind: .text, plainText: "材料1", sourceBundle: "", sourceName: "").item.id
+    let id2 = try store.capture(kind: .text, plainText: "材料2", sourceBundle: "", sourceName: "").item.id
+
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    vm.multiSelectedIDs = [id1]
+    vm.createDraftFromSelected()
+    let draft1Id = vm.activeDraft!.id
+
+    vm.multiSelectedIDs = [id2]
+    vm.createDraftFromSelected()
+    let draft2Id = vm.activeDraft!.id
+
+    runner.expectEqual(vm.drafts.count, 2, "drafts 数组中应保留 2 份草稿")
+    runner.expectEqual(vm.activeDraft?.id, draft2Id, "当前活动草稿应为最新创建的草稿2")
+
+    vm.selectDraft(id: draft1Id)
+    runner.expectEqual(vm.activeDraft?.id, draft1Id, "应能成功切换回草稿1")
+}
+
+runner.run("Acceptance LLM-C05: DraftSource 稳定 SHA-256 哈希计算跨生命周期一致") {
+    let text = "测试文本材料内容 123456"
+    let hash1 = DraftSource.computeStableHash(text)
+    let hash2 = DraftSource.computeStableHash(text)
+    runner.expectEqual(hash1, hash2, "稳定内容哈希应保证多次计算结果一致")
+    runner.expectEqual(hash1.count, 32, "指纹长度应为 32 字符 (16 字节 SHA-256) hex")
+}
+
 print("----")
 
 

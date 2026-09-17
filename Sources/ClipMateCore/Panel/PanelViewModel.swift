@@ -106,6 +106,25 @@ public final class PanelViewModel: ObservableObject {
     /// 批量多选（⇧↑↓ 扩展，存条目 id 以免列表刷新错位）。
     @Published public var multiSelectedIDs: Set<Int64> = []
 
+    // MARK: - LLM 工作草稿与意图控件
+    @Published public var drafts: [WorkingDraft] = []
+    @Published public var activeDraft: WorkingDraft? = nil {
+        didSet {
+            if let d = activeDraft {
+                if let idx = drafts.firstIndex(where: { $0.id == d.id }) {
+                    drafts[idx] = d
+                } else {
+                    drafts.append(d)
+                }
+            }
+        }
+    }
+    @Published public var isDraftGenerating = false
+    @Published public var isDraftReviewingDiff = false
+    @Published public var draftErrorMessage: String? = nil
+    private var draftTask: Task<Void, Never>?
+    public let draftAI: DraftAIService
+
     public let store: ClipStore
     public let settings: AppSettings
     public let ai: AIService
@@ -128,6 +147,7 @@ public final class PanelViewModel: ObservableObject {
         self.monitor = monitor
         self.frontApps = frontApps
         self.ai = ai
+        self.draftAI = DraftAIService(ai: ai, isLocalOnly: { [weak settings] in settings?.interactiveClipsLocalOnly ?? true })
         self.aiModel = AIWorkspaceModel(ai: ai, store: store, monitor: monitor, settings: settings)
         self.aiModel.pasteTargetProvider = { [weak self] in self?.pasteTarget }
         self.aiModel.hidePanel = { [weak self] in self?.dismiss?() }
@@ -297,6 +317,40 @@ public final class PanelViewModel: ObservableObject {
     public func handleCaptured(_ item: ClipItem) {
         invalidateItemCaches(for: item.id)
         reload()
+
+        // 若当前有活动草稿且开启了跟随复制，在后台评估新材料归属
+        if let draft = activeDraft, draft.followCopy, item.kind == .text || item.kind == .url, !item.plainText.isEmpty {
+            draftTask?.cancel()
+            let targetId = draft.id
+            let targetVersion = draft.version
+            draftTask = Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let result: DraftAIService.AttributionAIResult
+                if self.draftAI.isAvailable && !self.settings.interactiveClipsLocalOnly {
+                    result = await self.draftAI.evaluateAttribution(newItemText: item.plainText, draft: draft)
+                } else {
+                    let local = WorkingDraftEngine.evaluateAttributionLocally(newItemText: item.plainText, draft: draft)
+                    result = DraftAIService.AttributionAIResult(relation: local.relation, proposal: local.proposal, summary: local.summary)
+                }
+                guard !Task.isCancelled, var currentDraft = self.activeDraft, currentDraft.id == targetId, currentDraft.version == targetVersion else { return }
+                if result.relation != .irrelevant {
+                    let newSource = DraftSource(
+                        id: item.id,
+                        versionHash: DraftSource.computeStableHash(item.plainText),
+                        sourceName: item.sourceName,
+                        sourceBundle: item.sourceBundle,
+                        content: item.plainText,
+                        timestamp: item.createdAt
+                    )
+                    currentDraft.sources.append(newSource)
+                    if let proposal = result.proposal {
+                        currentDraft.pendingProposals.append(proposal)
+                    }
+                    currentDraft.changeSummary = result.summary.isEmpty ? "新材料已归入草稿" : result.summary
+                    self.activeDraft = currentDraft
+                }
+            }
+        }
     }
 
     /// 后台异步识别（OCR/智能标题/链接元数据等）完成后就地更新单条，不重排列表、不改变选中项与按钮位置
@@ -985,6 +1039,7 @@ public final class PanelViewModel: ObservableObject {
         let target = item ?? selectedItem
         guard let target else { return }
         try? store.delete(target.id)
+        markDraftSourcesExcluded(itemIDs: [target.id])
         reload()
     }
 
@@ -1174,11 +1229,43 @@ public final class PanelViewModel: ObservableObject {
 
     public func deleteMulti() {
         guard !multiSelectedIDs.isEmpty else { return }
-        for id in multiSelectedIDs {
+        let idsToDelete = multiSelectedIDs
+        for id in idsToDelete {
             try? store.delete(id)
         }
+        markDraftSourcesExcluded(itemIDs: idsToDelete)
         multiSelectedIDs.removeAll()
         reload()
+    }
+
+    private func markDraftSourcesExcluded(itemIDs: Set<Int64>) {
+        if var draft = activeDraft {
+            var changed = false
+            for i in 0..<draft.sources.count {
+                if itemIDs.contains(draft.sources[i].id) && draft.sources[i].status != .excluded {
+                    draft.sources[i].status = .excluded
+                    changed = true
+                }
+            }
+            if changed {
+                draft.changeSummary = "来源材料已在剪贴板中删除，已标记为移出"
+                activeDraft = draft
+            }
+        }
+        for dIdx in 0..<drafts.count {
+            var d = drafts[dIdx]
+            var changed = false
+            for i in 0..<d.sources.count {
+                if itemIDs.contains(d.sources[i].id) && d.sources[i].status != .excluded {
+                    d.sources[i].status = .excluded
+                    changed = true
+                }
+            }
+            if changed {
+                d.changeSummary = "部分来源材料已删除"
+                drafts[dIdx] = d
+            }
+        }
     }
 
     // MARK: - 片段管理
@@ -1299,5 +1386,322 @@ public final class PanelViewModel: ObservableObject {
         guard let image = NSImage(data: data) else { return nil }
         thumbCache.setObject(image, forKey: key)
         return image
+    }
+
+    // MARK: - 工作草稿管理 (Working Draft Actions)
+
+    /// 从当前批量多选或指定条目集合创建工作草稿
+    public func createDraftFromSelected(purpose: DraftPurpose? = nil) {
+        let targetItems: [ClipItem]
+        if !multiSelectedIDs.isEmpty {
+            targetItems = items.filter { multiSelectedIDs.contains($0.id) }
+        } else if let sel = selectedItem {
+            targetItems = [sel]
+        } else {
+            return
+        }
+        guard !targetItems.isEmpty else { return }
+
+        let sources = targetItems.map {
+            DraftSource(
+                id: $0.id,
+                versionHash: DraftSource.computeStableHash($0.plainText),
+                sourceName: $0.sourceName,
+                sourceBundle: $0.sourceBundle,
+                content: $0.plainText,
+                timestamp: $0.createdAt
+            )
+        }
+
+        // 立即生成本地高质量草稿底座
+        let draft = WorkingDraftEngine.createDraft(sources: sources, purpose: purpose)
+        activeDraft = draft
+        clearMultiSelection()
+        HapticHelper.feedback()
+
+        // 若配置了 AI 且未开启仅本地，则异步请求 LLM 智能提炼 (LLM-R14, LLM-R15)
+        if draftAI.isAvailable && !settings.interactiveClipsLocalOnly {
+            draftTask?.cancel()
+            let targetId = draft.id
+            isDraftGenerating = true
+            draftTask = Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let result = await self.draftAI.generateDraft(sources: sources, purpose: purpose)
+                guard !Task.isCancelled, var current = self.activeDraft, current.id == targetId else { return }
+                current.title = result.title
+                current.purpose = result.purpose
+                current.candidateText = result.draftText
+                current.controls = result.controls
+                current.unresolvedItems = result.unresolvedItems
+                current.changeSummary = result.summary
+                self.activeDraft = current
+                self.isDraftGenerating = false
+            }
+        }
+    }
+
+    /// 切换草稿的跟随复制更新开关
+    public func toggleDraftFollowCopy() {
+        guard var draft = activeDraft else { return }
+        draft.followCopy.toggle()
+        activeDraft = draft
+        HapticHelper.alignment()
+    }
+
+    /// 采用指定的修改建议
+    public func adoptDraftProposal(proposalId: String) {
+        guard var draft = activeDraft else { return }
+        let res = WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposalId)
+        switch res {
+        case .success:
+            draftErrorMessage = nil
+            activeDraft = draft
+            HapticHelper.feedback()
+        case .failure(let err):
+            draftErrorMessage = err.localizedDescription
+        }
+    }
+
+    /// 采用全部修改建议
+    public func adoptAllDraftProposals() {
+        guard var draft = activeDraft else { return }
+        let res = WorkingDraftEngine.adoptAllProposals(draft: &draft)
+        switch res {
+        case .success:
+            draftErrorMessage = nil
+            activeDraft = draft
+            isDraftReviewingDiff = false
+            HapticHelper.feedback()
+        case .failure(let err):
+            draftErrorMessage = err.localizedDescription
+        }
+    }
+
+    /// 拒绝指定的修改建议
+    public func rejectDraftProposal(proposalId: String) {
+        guard var draft = activeDraft else { return }
+        WorkingDraftEngine.rejectProposal(draft: &draft, proposalId: proposalId)
+        activeDraft = draft
+        HapticHelper.alignment()
+    }
+
+    /// 提交自然语言一句话修改
+    public func submitDraftRevision(instruction: String) {
+        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let draft = activeDraft else { return }
+
+        draftTask?.cancel()
+        let targetId = draft.id
+        let targetVersion = draft.version
+        isDraftGenerating = true
+
+        draftTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            let proposal: DraftRevisionProposal?
+            if self.draftAI.isAvailable && !self.settings.interactiveClipsLocalOnly {
+                proposal = await self.draftAI.proposeRevision(instruction: trimmed, draft: draft)
+            } else {
+                let change = DraftTextChange(originalSnippet: "", proposedSnippet: "【修改要求：\(trimmed)】", reason: trimmed, action: .insert)
+                proposal = DraftRevisionProposal(title: "修改要求：\(trimmed)", reason: trimmed, targetVersion: draft.version, changes: [change])
+            }
+            guard !Task.isCancelled, var current = self.activeDraft, current.id == targetId, current.version == targetVersion else { return }
+            if let prop = proposal {
+                current.pendingProposals.append(prop)
+                current.changeSummary = "已生成修改建议：\(prop.title)"
+                self.isDraftReviewingDiff = true
+            } else {
+                current.changeSummary = "未能定位「\(trimmed)」关联位置"
+            }
+            self.activeDraft = current
+            self.isDraftGenerating = false
+            HapticHelper.feedback()
+        }
+    }
+
+    /// 操作草稿目标控件
+    public func updateDraftControl(controlId: String, newValue: String) {
+        guard var draft = activeDraft else { return }
+        guard let cIdx = draft.controls.firstIndex(where: { $0.id == controlId }) else { return }
+        let control = draft.controls[cIdx]
+
+        if WorkingDraftEngine.applyControlValue(draft: &draft, controlID: controlId, newValue: newValue) {
+            activeDraft = draft
+            HapticHelper.alignment()
+
+            // LLM-R07: 语义目标与偏好控件触发 LLM 候选修改生成
+            switch control.type {
+            case .options, .preferenceSlider:
+                triggerGoalAIRevision(control: control, newValue: newValue)
+            default:
+                break
+            }
+        }
+    }
+
+    private func triggerGoalAIRevision(control: DraftGoalControl, newValue: String) {
+        guard draftAI.isAvailable && !settings.interactiveClipsLocalOnly, let draft = activeDraft else { return }
+        draftTask?.cancel()
+        let targetId = draft.id
+        let targetVersion = draft.version
+        isDraftGenerating = true
+        draftTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            let proposal = await self.draftAI.proposeGoalAdjustment(draft: draft, control: control, newValue: newValue)
+            guard !Task.isCancelled, var current = self.activeDraft, current.id == targetId, current.version == targetVersion else { return }
+            if let prop = proposal {
+                current.pendingProposals.append(prop)
+                current.changeSummary = "已根据「\(control.name)」生成调整建议"
+                self.isDraftReviewingDiff = true
+            }
+            self.activeDraft = current
+            self.isDraftGenerating = false
+            HapticHelper.feedback()
+        }
+    }
+
+    /// 确认采用候选草稿 (LLM-C02)
+    public func confirmAdoptDraft() {
+        guard var draft = activeDraft else { return }
+        draft.confirmAdoption()
+        activeDraft = draft
+        HapticHelper.feedback()
+    }
+
+    /// 手动编辑草稿正文 (LLM-C01)
+    public func updateDraftText(newText: String) {
+        guard var draft = activeDraft else { return }
+        draft.pushSnapshot()
+        draft.userEditedText = newText
+        draft.status = .editing
+        draft.version += 1
+        draft.changeSummary = "已手动编辑修改"
+        draft.updatedAt = Date()
+        WorkingDraftEngine.refreshDerivedState(draft: &draft)
+        activeDraft = draft
+    }
+
+    /// 切换草稿信息层级 (LLM-C04)
+    public func setDraftZoomLevel(level: ZoomLevel) {
+        guard var draft = activeDraft else { return }
+        draft.currentZoom = level
+        activeDraft = draft
+        HapticHelper.alignment()
+    }
+
+    /// 解决/确认未决问题项 (LLM-C03)
+    public func resolveUnresolvedItem(itemId: String, answer: String) {
+        guard var draft = activeDraft else { return }
+        guard let idx = draft.unresolvedItems.firstIndex(where: { $0.id == itemId }) else { return }
+        draft.pushSnapshot()
+        draft.unresolvedItems[idx].resolvedValue = answer
+        draft.changeSummary = "已确认事项：\(answer)"
+        let change = DraftTextChange(
+            originalSnippet: "",
+            proposedSnippet: "• 确认项：\(draft.unresolvedItems[idx].question) —— \(answer)",
+            reason: "用户确认未决问题",
+            action: .insert
+        )
+        let proposal = DraftRevisionProposal(
+            title: "确认未决事项",
+            reason: "将用户的解答记入草稿",
+            targetVersion: draft.version,
+            changes: [change]
+        )
+        draft.pendingProposals.append(proposal)
+        WorkingDraftEngine.adoptProposal(draft: &draft, proposalId: proposal.id)
+        activeDraft = draft
+        HapticHelper.feedback()
+    }
+
+    /// 复制当前草稿生效内容
+    public func copyDraft() {
+        guard let draft = activeDraft else { return }
+        let text = draft.effectiveText
+        guard !text.isEmpty else { return }
+
+        monitor.suppress(seconds: 1.5)
+        PasteBack.write(.text(text))
+        ToastHUD.shared.show(icon: "checkmark", title: L10n.tr("draft.copy", lang: settings.appLanguage), subtitle: "\(text.count) 字已复制到剪贴板")
+        HapticHelper.feedback()
+    }
+
+    /// 粘贴当前草稿生效内容至前台应用
+    public func pasteDraft() {
+        guard let draft = activeDraft else { return }
+        let text = draft.effectiveText
+        guard !text.isEmpty else { return }
+        pasteContent(.text(text))
+    }
+
+    /// 撤销上一次草稿修改
+    public func undoDraft() {
+        guard var draft = activeDraft else { return }
+        if draft.undo() {
+            activeDraft = draft
+            HapticHelper.feedback()
+        }
+    }
+
+    /// 结束或关闭当前草稿 (LLM-R15)
+    public func closeDraft() {
+        draftTask?.cancel()
+        draftTask = nil
+        isDraftGenerating = false
+        isDraftReviewingDiff = false
+        activeDraft = nil
+        HapticHelper.alignment()
+    }
+
+    /// 切换/选择指定的草稿 (LLM-R19)
+    public func selectDraft(id: UUID) {
+        if let found = drafts.first(where: { $0.id == id }) {
+            activeDraft = found
+            HapticHelper.alignment()
+        }
+    }
+
+    /// 移出指定草稿 (LLM-R19)
+    public func removeDraft(id: UUID) {
+        drafts.removeAll { $0.id == id }
+        if activeDraft?.id == id {
+            activeDraft = drafts.last
+        }
+        HapticHelper.alignment()
+    }
+
+    /// 从草稿中移出某个来源材料并安全更新 (LLM-R11: 绝不调用 createDraft 冲掉已有状态)
+    public func removeSourceFromDraft(sourceId: Int64) {
+        guard var draft = activeDraft else { return }
+        guard let sourceToRemove = draft.sources.first(where: { $0.id == sourceId }) else { return }
+
+        draft.pushSnapshot()
+        draft.sources.removeAll { $0.id == sourceId }
+        draft.changeSummary = "已移出材料来源「\(sourceToRemove.sourceName)」"
+        draft.version += 1
+        draft.updatedAt = Date()
+
+        if draft.sources.isEmpty {
+            activeDraft = nil
+            return
+        }
+
+        // 若当前为初始候选草稿（未确认、未编辑），基于剩余来源重新生成候选文本
+        if draft.isCandidate {
+            let recomputed = WorkingDraftEngine.createDraft(sources: draft.sources, purpose: draft.purpose, title: draft.title)
+            draft.candidateText = recomputed.candidateText
+            draft.unresolvedItems = recomputed.unresolvedItems
+            WorkingDraftEngine.refreshDerivedState(draft: &draft)
+        } else {
+            // 若草稿已有已确认正文或用户编辑，保留已有编辑；若移出的材料在正文中存在直接片段，生成修改建议
+            let removedSnippet = sourceToRemove.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !removedSnippet.isEmpty && draft.fullDraftText.contains(removedSnippet) {
+                let change = DraftTextChange(originalSnippet: removedSnippet, proposedSnippet: "", reason: "来源材料已移出", action: .delete)
+                let proposal = DraftRevisionProposal(title: "移出来源受影响内容", reason: "移出「\(sourceToRemove.sourceName)」对应片段", targetVersion: draft.version, changes: [change])
+                draft.pendingProposals.append(proposal)
+            }
+        }
+
+        activeDraft = draft
+        HapticHelper.alignment()
     }
 }

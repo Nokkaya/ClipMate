@@ -27,6 +27,9 @@ struct PanelView: View {
                         SnippetGroupBar(viewModel: viewModel)
                     }
                     RecommendationBar(viewModel: viewModel)
+                    if viewModel.activeDraft != nil {
+                        WorkingDraftCardView(viewModel: viewModel)
+                    }
                     Divider().overlay(Color.primary.opacity(0.08))
                     if viewModel.items.isEmpty {
                         EmptyStateView(query: viewModel.query)
@@ -606,6 +609,13 @@ struct BatchActionBar: View {
                 viewModel.copyMulti()
             } label: {
                 Label(L10n.tr("batch.copy_all", lang: viewModel.settings.appLanguage), systemImage: "doc.on.doc")
+            }
+            .clipMateGlass(size: .small)
+
+            Button {
+                viewModel.createDraftFromSelected()
+            } label: {
+                Label(L10n.tr("batch.create_draft", lang: viewModel.settings.appLanguage), systemImage: "square.and.pencil")
             }
             .clipMateAccent(size: .small)
 

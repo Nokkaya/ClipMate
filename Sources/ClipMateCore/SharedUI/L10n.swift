@@ -175,7 +175,21 @@ public enum L10n {
         "batch.copy_all": "合并复制",
         "batch.pin_all": "批量固定",
         "batch.delete_all": "批量删除",
+        "batch.create_draft": "整理成草稿",
         "batch.cancel": "取消",
+
+        // 工作草稿与意图控件
+        "draft.title": "工作草稿",
+        "draft.copy": "复制草稿",
+        "draft.paste": "粘贴草稿",
+        "draft.review_proposals": "查看修改 (%d)",
+        "draft.adopt_all": "采用全部修改",
+        "draft.reject_all": "忽略修改",
+        "draft.undo": "撤销修改",
+        "draft.follow_copy": "跟随复制",
+        "draft.sources_count": "%d 份材料",
+        "draft.prompt_placeholder": "输入修改指令 (如: 留点余地、适合1人完成)...",
+        "draft.close": "结束草稿",
 
         // 分类与状态
         "filter.all": "全部",
@@ -688,7 +702,21 @@ public enum L10n {
         "batch.copy_all": "Copy Combined",
         "batch.pin_all": "Pin",
         "batch.delete_all": "Delete",
+        "batch.create_draft": "Collate into Draft",
         "batch.cancel": "Cancel",
+
+        // Working Draft & Intent Controls
+        "draft.title": "Working Draft",
+        "draft.copy": "Copy Draft",
+        "draft.paste": "Paste Draft",
+        "draft.review_proposals": "Review Changes (%d)",
+        "draft.adopt_all": "Adopt All Changes",
+        "draft.reject_all": "Dismiss Changes",
+        "draft.undo": "Undo",
+        "draft.follow_copy": "Follow Copy",
+        "draft.sources_count": "%d materials",
+        "draft.prompt_placeholder": "Type revision request (e.g. leave some leeway)...",
+        "draft.close": "Finish Draft",
 
         // Categories & States
         "filter.all": "All",
