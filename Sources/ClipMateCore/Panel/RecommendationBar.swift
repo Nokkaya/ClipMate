@@ -133,12 +133,12 @@ struct RecommendationCard: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(hovered ? theme.hoverBackground : Color.primary.opacity(0.04))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(hovered ? theme.hoverBackground : Color.primary.opacity(0.03))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(hovered ? theme.accent.opacity(0.4) : Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(hovered ? theme.accent.opacity(0.35) : Color.primary.opacity(0.06), lineWidth: 0.8)
         )
         .onHover { hovered = $0 }
         .help(rec.item.plainText)

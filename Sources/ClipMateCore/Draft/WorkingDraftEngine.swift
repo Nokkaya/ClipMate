@@ -379,6 +379,7 @@ public enum WorkingDraftEngine {
                         InteractiveControlEngine.recalculate(session: &session)
                         draft.confirmedText = session.adjustedText
                         draft.candidateText = nil
+                        draft.userEditedText = nil
                         control.currentValue = "\(Int(targetNum))"
                         draft.controls[index] = control
                         draft.changeSummary = "已将\(control.name)调整为 \(newValue)\(unit)"
@@ -393,8 +394,8 @@ public enum WorkingDraftEngine {
                 let pattern: String
                 let replacement: String
                 if !unit.isEmpty {
-                    pattern = #"(?<![0-9])"# + NSRegularExpression.escapedPattern(for: oldVal) + #"\s*"# + NSRegularExpression.escapedPattern(for: unit)
-                    replacement = "\(newValue)\(unit)"
+                    pattern = #"(?<![0-9])"# + NSRegularExpression.escapedPattern(for: oldVal) + #"(\s*)"# + NSRegularExpression.escapedPattern(for: unit)
+                    replacement = "\(newValue)$1\(unit)"
                 } else {
                     pattern = #"(?<![0-9])"# + NSRegularExpression.escapedPattern(for: oldVal) + #"(?![0-9])"#
                     replacement = newValue
@@ -406,6 +407,7 @@ public enum WorkingDraftEngine {
                     if newText != currentText {
                         draft.confirmedText = newText
                         draft.candidateText = nil
+                        draft.userEditedText = nil
                         control.currentValue = newValue
                         draft.controls[index] = control
                         draft.changeSummary = "已将\(control.name)调整为 \(newValue)\(unit)"

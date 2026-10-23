@@ -32,9 +32,9 @@ public struct ToastHUDView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
         )
-        .shadow(color: .black.opacity(0.25), radius: 16, y: 6)
+        .shadow(color: .black.opacity(0.20), radius: 14, y: 5)
     }
 }
 

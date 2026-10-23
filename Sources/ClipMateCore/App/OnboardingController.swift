@@ -87,20 +87,22 @@ struct OnboardingView: View {
     }
 
     private func featureCard(icon: String, tint: Color, title: String, desc: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             Image(systemName: icon)
-                .font(.system(size: 18))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7).fill(tint.opacity(0.12)))
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
             Text(desc)
-                .font(.system(size: 10))
+                .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)
         }
-        .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+        .padding(11)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.035)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8))
     }
 }

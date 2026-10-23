@@ -20,8 +20,7 @@ struct PanelView: View {
                 // 左侧：剪贴板列表主区域（瘦身 1/3：从 660px 缩减为 440px）
                 VStack(spacing: 0) {
                     SearchBar(viewModel: viewModel)
-                    FilterChips(viewModel: viewModel)
-                    ContextFilterBar(viewModel: viewModel)
+                    FilterToolbar(viewModel: viewModel)
                     // 片段分类下展示分组栏（全部 / 各分组 / 新建片段）
                     if viewModel.filter == .snippet {
                         SnippetGroupBar(viewModel: viewModel)
@@ -30,13 +29,13 @@ struct PanelView: View {
                     if viewModel.activeDraft != nil {
                         WorkingDraftCardView(viewModel: viewModel)
                     }
-                    Divider().overlay(Color.primary.opacity(0.08))
+                    Divider().overlay(Color.primary.opacity(0.05))
                     if viewModel.items.isEmpty {
                         EmptyStateView(query: viewModel.query)
                     } else {
                         ClipList(viewModel: viewModel)
                     }
-                    Divider().overlay(Color.primary.opacity(0.08))
+                    Divider().overlay(Color.primary.opacity(0.05))
                     if viewModel.multiSelectedIDs.count > 1 {
                         BatchActionBar(viewModel: viewModel)
                     } else {
@@ -104,10 +103,11 @@ struct SearchBar: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
             TextField(L10n.tr("search.placeholder", lang: viewModel.settings.appLanguage), text: $viewModel.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 14))
+                .font(.system(size: 13.5))
                 .focused($focused)
                 .help(L10n.tr("search.syntax_hint", lang: viewModel.settings.appLanguage))
 
@@ -117,38 +117,41 @@ struct SearchBar: View {
                     viewModel.reload()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
                 }
-                .clipMateIconButton(size: 20)
+                .buttonStyle(.plain)
+                .padding(.horizontal, 2)
             }
 
             let theme = viewModel.settings.appTheme
-            // AI 问答侧边栏快速展开/收起切换按钮
+            // AI 问答侧边栏快速展开/收起切换按钮 (精致现代胶囊)
             Button {
                 viewModel.toggleAISidebar()
             } label: {
-                HStack(spacing: 3) {
+                HStack(spacing: 3.5) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                     Text("AI")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 3.5)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(viewModel.isAISidebarOpen ? theme.accent.opacity(0.18) : Color.primary.opacity(0.06))
+                    Capsule()
+                        .fill(viewModel.isAISidebarOpen ? theme.accent.opacity(0.18) : Color.primary.opacity(0.05))
                 )
                 .foregroundStyle(viewModel.isAISidebarOpen ? theme.accent : Color.secondary)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(viewModel.isAISidebarOpen ? theme.accent.opacity(0.4) : Color.clear, lineWidth: 1)
+                    Capsule()
+                        .strokeBorder(viewModel.isAISidebarOpen ? theme.accent.opacity(0.35) : Color.clear, lineWidth: 0.8)
                 )
             }
             .buttonStyle(.plain)
             .help(L10n.tr("search.help", lang: viewModel.settings.appLanguage))
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
         .onAppear { focused = true }
         .onReceive(NotificationCenter.default.publisher(for: .clipmateFocusSearch)) { _ in
             focused = true
@@ -159,38 +162,9 @@ struct SearchBar: View {
     }
 }
 
-// MARK: - 分类过滤
+// MARK: - 统一极简筛选工具栏（单行横向胶囊 + 紧凑情境下拉）
 
-struct FilterChips: View {
-    @ObservedObject var viewModel: PanelViewModel
-    @ObservedObject var settings: AppSettings
-
-    init(viewModel: PanelViewModel) {
-        self.viewModel = viewModel
-        self.settings = viewModel.settings
-    }
-
-    var body: some View {
-        // 固定 4 列网格：分类增至 8 个后仍能全部可见可点（横向滚动在面板里不可用）
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4),
-            spacing: 4
-        ) {
-            ForEach(FilterKind.allCases) { kind in
-                FilterChip(kind: kind, selected: viewModel.filter == kind, lang: settings.appLanguage) {
-                    viewModel.changeFilter(kind)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-    }
-}
-
-// MARK: - 情境过滤（来源应用 + 时间范围）
-
-/// 把"我记得是昨天从微信复制的"变成可点选的条件。
-struct ContextFilterBar: View {
+struct FilterToolbar: View {
     @ObservedObject var viewModel: PanelViewModel
     @ObservedObject var settings: AppSettings
 
@@ -201,106 +175,128 @@ struct ContextFilterBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Menu {
-                ForEach(TimeFilter.allCases) { time in
-                    Button {
-                        viewModel.setTimeFilter(time)
-                    } label: {
-                        if viewModel.timeFilter == time {
-                            Label(L10n.timeTitle(time, lang: settings.appLanguage), systemImage: "checkmark")
-                        } else {
-                            Text(L10n.timeTitle(time, lang: settings.appLanguage))
+            // 1. 分类横向轻量胶囊条
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 3) {
+                    ForEach(FilterKind.allCases) { kind in
+                        FilterChip(kind: kind, selected: viewModel.filter == kind, lang: settings.appLanguage) {
+                            viewModel.changeFilter(kind)
                         }
                     }
                 }
-            } label: {
-                menuLabel(
-                    icon: "clock",
-                    text: L10n.timeTitle(viewModel.timeFilter, lang: settings.appLanguage),
-                    active: viewModel.timeFilter != .all
-                )
+                .padding(.horizontal, 10)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
 
-            Menu {
-                Button {
-                    viewModel.setSourceFilter(nil)
-                } label: {
-                    if viewModel.sourceFilter == nil {
-                        Label(L10n.tr("filter.all_sources", lang: settings.appLanguage), systemImage: "checkmark")
-                    } else {
-                        Text(L10n.tr("filter.all_sources", lang: settings.appLanguage))
-                    }
-                }
-                if !viewModel.availableSources.isEmpty {
-                    Divider()
-                    ForEach(viewModel.availableSources) { source in
+            // 2. 右侧紧凑情境筛选与状态
+            HStack(spacing: 4) {
+                // 如果当前有时段或来源过滤激活，展示小巧激活标签与快捷清除
+                if viewModel.contextFilter.isActive {
+                    HStack(spacing: 3) {
+                        Text(activeFilterTitle)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .lineLimit(1)
                         Button {
-                            viewModel.setSourceFilter(source.bundle)
+                            viewModel.clearContextFilter()
                         } label: {
-                            if viewModel.sourceFilter == source.bundle {
-                                Label("\(source.name) (\(source.count))", systemImage: "checkmark")
-                            } else {
-                                Text("\(source.name) (\(source.count))")
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2.5)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                    .foregroundStyle(Color.accentColor)
+                    .help(L10n.tr("filter.clear_context", lang: settings.appLanguage))
+                }
+
+                // 综合情境过滤下拉菜单 (时间 + 来源)
+                Menu {
+                    Section {
+                        ForEach(TimeFilter.allCases) { time in
+                            Button {
+                                viewModel.setTimeFilter(time)
+                            } label: {
+                                if viewModel.timeFilter == time {
+                                    Label(L10n.timeTitle(time, lang: settings.appLanguage), systemImage: "checkmark")
+                                } else {
+                                    Text(L10n.timeTitle(time, lang: settings.appLanguage))
+                                }
                             }
                         }
+                    } header: {
+                        Text(L10n.tr("filter.time_scope", lang: settings.appLanguage))
                     }
-                }
-            } label: {
-                menuLabel(
-                    icon: "app.badge",
-                    text: viewModel.sourceFilterName ?? L10n.tr("filter.all_sources", lang: settings.appLanguage),
-                    active: viewModel.sourceFilter != nil
-                )
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
 
-            if viewModel.contextFilter.isActive {
-                Button {
-                    viewModel.clearContextFilter()
+                    Section {
+                        Button {
+                            viewModel.setSourceFilter(nil)
+                        } label: {
+                            if viewModel.sourceFilter == nil {
+                                Label(L10n.tr("filter.all_sources", lang: settings.appLanguage), systemImage: "checkmark")
+                            } else {
+                                Text(L10n.tr("filter.all_sources", lang: settings.appLanguage))
+                            }
+                        }
+                        if !viewModel.availableSources.isEmpty {
+                            Divider()
+                            ForEach(viewModel.availableSources) { source in
+                                Button {
+                                    viewModel.setSourceFilter(source.bundle)
+                                } label: {
+                                    if viewModel.sourceFilter == source.bundle {
+                                        Label("\(source.name) (\(source.count))", systemImage: "checkmark")
+                                    } else {
+                                        Text("\(source.name) (\(source.count))")
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text(L10n.tr("filter.source_scope", lang: settings.appLanguage))
+                    }
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
+                    Image(systemName: viewModel.contextFilter.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(viewModel.contextFilter.isActive ? Color.accentColor : Color.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            Circle()
+                                .fill(viewModel.contextFilter.isActive ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04))
+                        )
                 }
-                .clipMateIconButton(size: 18)
-                .help(L10n.tr("filter.clear_context", lang: settings.appLanguage))
-            }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(L10n.tr("filter.context_tooltip", lang: settings.appLanguage))
 
-            Spacer()
-
-            if settings.pauseCapture {
-                HStack(spacing: 3) {
-                    Circle().fill(Color.orange).frame(width: 6, height: 6)
-                    Text(L10n.tr("filter.paused", lang: settings.appLanguage))
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.orange)
+                // 暂停采集指示灯
+                if settings.pauseCapture {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color.orange).frame(width: 5, height: 5)
+                        Text(L10n.tr("filter.paused", lang: settings.appLanguage))
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(Color.orange)
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.12)))
                 }
-                .padding(.trailing, 4)
             }
+            .padding(.trailing, 10)
         }
-        .padding(.horizontal, 12)
         .padding(.vertical, 3)
     }
 
-    private func menuLabel(icon: String, text: String, active: Bool) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 9.5))
-            Text(text)
-                .font(.system(size: 10.5, weight: active ? .medium : .regular))
-                .lineLimit(1)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 7, weight: .bold))
+    private var activeFilterTitle: String {
+        var parts: [String] = []
+        if viewModel.timeFilter != .all {
+            parts.append(L10n.timeTitle(viewModel.timeFilter, lang: settings.appLanguage))
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(active ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.05)))
-        .foregroundStyle(active ? Color.accentColor : Color.secondary)
-        .contentShape(Capsule())
+        if let sourceName = viewModel.sourceFilterName {
+            parts.append(sourceName)
+        }
+        return parts.joined(separator: " / ")
     }
 }
 
@@ -309,29 +305,28 @@ private struct FilterChip: View {
     let selected: Bool
     var lang: AppLanguage = .system
     let action: () -> Void
+    @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 3) {
+            HStack(spacing: 3.5) {
                 Image(systemName: kind.systemImage)
-                    .font(.system(size: 10))
+                    .font(.system(size: 9.5))
                 Text(L10n.filterTitle(kind, lang: lang))
                     .font(.system(size: 11, weight: selected ? .medium : .regular))
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
             }
             .padding(.horizontal, 7)
-            .padding(.vertical, 3.5)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 3)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(selected ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.04))
+                Capsule()
+                    .fill(selected ? Color.accentColor.opacity(0.15) : (hovered ? Color.primary.opacity(0.05) : Color.clear))
             )
             .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 }
     }
 }
 
@@ -506,8 +501,20 @@ struct ContextMenuItems: View {
             _ = viewModel.toggleQueue(item: item)
         }
         Button(L10n.tr("action.ai_actions")) { viewModel.openAI(item: item) }
+        Button(L10n.tr("action.create_draft")) {
+            viewModel.selectOnly(item: item)
+            viewModel.createDraftFromSelected()
+        }
+        if viewModel.activeDraft != nil {
+            Button(L10n.tr("action.add_to_draft")) {
+                viewModel.addSourceToActiveDraft(item: item)
+            }
+        }
         Divider()
         if viewModel.multiSelectedIDs.count > 1 {
+            Button(L10n.tr("batch.create_draft")) {
+                viewModel.createDraftFromSelected()
+            }
             Button(L10n.tr("batch.copy_count", viewModel.multiSelectedIDs.count)) {
                 viewModel.copyMulti()
             }
@@ -532,18 +539,19 @@ struct EmptyStateView: View {
     let query: String
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Image(systemName: query.isEmpty ? "doc.on.clipboard" : "magnifyingglass")
-                .font(.system(size: 34))
+                .font(.system(size: 32, weight: .light))
                 .foregroundStyle(.quaternary)
             Text(query.isEmpty ? L10n.tr("empty.title") : L10n.tr("empty.no_match"))
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 13.5, weight: .medium))
                 .foregroundStyle(.secondary)
             Text(query.isEmpty ? L10n.tr("empty.subtitle") : L10n.tr("empty.no_match_sub"))
-                .font(.system(size: 12))
+                .font(.system(size: 11.5))
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 }
 
@@ -553,21 +561,20 @@ struct FooterBar: View {
     @ObservedObject var settings: AppSettings
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 9) {
             KeyHint("⏎", L10n.tr("footer.paste", lang: settings.appLanguage))
             KeyHint("⌘⏎", L10n.tr("footer.copy", lang: settings.appLanguage))
             KeyHint("⌘I", L10n.tr("footer.preview", lang: settings.appLanguage))
             KeyHint("⌘K", L10n.tr("footer.ai", lang: settings.appLanguage))
-            KeyHint("⌫", L10n.tr("footer.delete", lang: settings.appLanguage))
+            KeyHint("⌘⌫", L10n.tr("footer.delete", lang: settings.appLanguage))
             Spacer()
             KeyHint("Esc", L10n.tr("footer.cancel", lang: settings.appLanguage))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color.primary.opacity(0.04))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.02))
     }
 }
-
 
 private struct KeyHint: View {
     let key: String
@@ -581,13 +588,17 @@ private struct KeyHint: View {
     var body: some View {
         HStack(spacing: 3) {
             Text(key)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 9.5, weight: .medium, design: .rounded))
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.09)))
+                .background(
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                )
+                .foregroundStyle(.secondary)
             Text(action)
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
         }
     }
 }
@@ -598,10 +609,13 @@ struct BatchActionBar: View {
     @ObservedObject var viewModel: PanelViewModel
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text(L10n.tr("batch.selected", viewModel.multiSelectedIDs.count, lang: viewModel.settings.appLanguage))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2.5)
+                .background(Capsule().fill(Color.accentColor.opacity(0.12)))
 
             Spacer()
 
@@ -619,37 +633,49 @@ struct BatchActionBar: View {
             }
             .clipMateAccent(size: .small)
 
-            Button {
-                viewModel.togglePinMulti()
-            } label: {
-                Label(L10n.tr("batch.pin_all", lang: viewModel.settings.appLanguage), systemImage: "pin")
-            }
-            .clipMateGlass(size: .small)
+            HStack(spacing: 2) {
+                Button {
+                    viewModel.togglePinMulti()
+                } label: {
+                    Image(systemName: "pin")
+                }
+                .clipMateIconButton(size: 22)
+                .help(L10n.tr("batch.pin_all", lang: viewModel.settings.appLanguage))
 
-            Button {
-                viewModel.enqueueMulti()
-            } label: {
-                Label(L10n.tr("batch.paste_queue", lang: viewModel.settings.appLanguage), systemImage: "list.number")
-            }
-            .clipMateGlass(size: .small)
+                Button {
+                    viewModel.enqueueMulti()
+                } label: {
+                    Image(systemName: "list.number")
+                }
+                .clipMateIconButton(size: 22)
+                .help(L10n.tr("batch.paste_queue", lang: viewModel.settings.appLanguage))
 
-            Button(role: .destructive) {
-                viewModel.deleteMulti()
-            } label: {
-                Label(L10n.tr("batch.delete_all", lang: viewModel.settings.appLanguage), systemImage: "trash")
-            }
-            .clipMateDanger(prominent: false, size: .small)
+                Button(role: .destructive) {
+                    viewModel.deleteMulti()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .clipMateIconButton(size: 22, tint: .red)
+                .help(L10n.tr("batch.delete_all", lang: viewModel.settings.appLanguage))
 
-            Button {
-                viewModel.clearMultiSelection()
-            } label: {
-                Label(L10n.tr("batch.cancel", lang: viewModel.settings.appLanguage), systemImage: "xmark")
+                Button {
+                    viewModel.clearMultiSelection()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .clipMateIconButton(size: 22)
+                .help(L10n.tr("batch.cancel", lang: viewModel.settings.appLanguage))
             }
-            .clipMateGlass(size: .small)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(Color.accentColor.opacity(0.12))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4.5)
+        .background(Color.accentColor.opacity(0.08))
+        .overlay(
+            Rectangle()
+                .frame(height: 0.8)
+                .foregroundStyle(Color.accentColor.opacity(0.15)),
+            alignment: .top
+        )
     }
 }
 

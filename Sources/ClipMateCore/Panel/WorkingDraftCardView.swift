@@ -11,6 +11,7 @@ public struct WorkingDraftCardView: View {
     @State private var isEditingContent: Bool = false
     @State private var tempContent: String = ""
     @State private var isContentExpanded: Bool = true
+    @FocusState private var isPromptFocused: Bool
 
     public init(viewModel: PanelViewModel) {
         self.viewModel = viewModel
@@ -69,15 +70,38 @@ public struct WorkingDraftCardView: View {
             }
             .padding(10)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(viewModel.settings.appTheme.accent.opacity(0.08))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(viewModel.settings.appTheme.accent.opacity(0.06))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(viewModel.settings.appTheme.accent.opacity(0.28), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(viewModel.settings.appTheme.accent.opacity(0.20), lineWidth: 0.8)
             )
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
+            .onChange(of: viewModel.activeDraft?.id) { _ in
+                isEditingContent = false
+                tempContent = ""
+                isEditingTitle = false
+                tempTitle = ""
+                viewModel.isDraftEditingText = false
+            }
+            .onChange(of: isEditingContent) { editing in
+                viewModel.isDraftEditingText = editing || isEditingTitle
+            }
+            .onChange(of: isEditingTitle) { editing in
+                viewModel.isDraftEditingText = editing || isEditingContent
+            }
+            .onChange(of: viewModel.isDraftEditingText) { isEditing in
+                if !isEditing {
+                    isEditingContent = false
+                    isEditingTitle = false
+                }
+            }
+            .onDisappear {
+                viewModel.isDraftEditingText = false
+                viewModel.isAIPromptFocused = false
+            }
         }
     }
 
@@ -88,29 +112,41 @@ public struct WorkingDraftCardView: View {
             HStack(spacing: 4) {
                 ForEach(viewModel.drafts) { d in
                     let isActive = (d.id == activeId)
-                    Button {
-                        viewModel.selectDraft(id: d.id)
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: d.purpose.icon)
-                                .font(.system(size: 9))
-                            Text(d.title)
-                                .font(.system(size: 10, weight: isActive ? .bold : .regular))
-                                .lineLimit(1)
-                            if isActive {
-                                Circle()
-                                    .fill(viewModel.settings.appTheme.accent)
-                                    .frame(width: 4, height: 4)
+                    HStack(spacing: 4) {
+                        Button {
+                            viewModel.selectDraft(id: d.id)
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: d.purpose.icon)
+                                    .font(.system(size: 9))
+                                Text(d.title)
+                                    .font(.system(size: 10, weight: isActive ? .bold : .regular))
+                                    .lineLimit(1)
+                                if isActive {
+                                    Circle()
+                                        .fill(viewModel.settings.appTheme.accent)
+                                        .frame(width: 4, height: 4)
+                                }
                             }
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(isActive ? viewModel.settings.appTheme.accent.opacity(0.18) : Color.primary.opacity(0.04))
-                        )
+                        .buttonStyle(.plain)
+
+                        Button {
+                            viewModel.removeDraft(id: d.id)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(isActive ? viewModel.settings.appTheme.accent : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(L10n.tr("draft.close_tab", lang: viewModel.settings.appLanguage))
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(isActive ? viewModel.settings.appTheme.accent.opacity(0.18) : Color.primary.opacity(0.04))
+                    )
                 }
             }
         }
@@ -351,13 +387,16 @@ public struct WorkingDraftCardView: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(viewModel.settings.appTheme.accent.opacity(0.5), lineWidth: 1))
             } else if isContentExpanded {
                 let displayText = draft.effectiveText
-                Text(displayText.isEmpty ? "（草稿正文为空）" : displayText)
-                    .font(.system(size: 11))
-                    .lineSpacing(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.03)))
-                    .lineLimit(8)
+                ScrollView(.vertical) {
+                    Text(displayText.isEmpty ? "（草稿正文为空）" : displayText)
+                        .font(.system(size: 11))
+                        .lineSpacing(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 120)
+                .padding(6)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.03)))
             }
         }
     }
@@ -442,6 +481,10 @@ public struct WorkingDraftCardView: View {
             })
             .textFieldStyle(.plain)
             .font(.system(size: 11.5))
+            .focused($isPromptFocused)
+            .onChange(of: isPromptFocused) { focused in
+                viewModel.isAIPromptFocused = focused
+            }
 
             if !naturalLanguageInput.isEmpty {
                 Button {
@@ -483,48 +526,53 @@ public struct WorkingDraftCardView: View {
                 .clipMateAccent(size: .small)
             }
 
-            ForEach(draft.pendingProposals.filter { !$0.isAdopted && !$0.isRejected }) { proposal in
+            ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(proposal.title)
-                            .font(.system(size: 11, weight: .medium))
-                        Spacer()
-                        Button("采用") {
-                            viewModel.adoptDraftProposal(proposalId: proposal.id)
-                        }
-                        .clipMateGlass(size: .small)
+                    ForEach(draft.pendingProposals.filter { !$0.isAdopted && !$0.isRejected }) { proposal in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(proposal.title)
+                                    .font(.system(size: 11, weight: .medium))
+                                Spacer()
+                                Button("采用") {
+                                    viewModel.adoptDraftProposal(proposalId: proposal.id)
+                                }
+                                .clipMateGlass(size: .small)
 
-                        Button("忽略") {
-                            viewModel.rejectDraftProposal(proposalId: proposal.id)
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    }
-
-                    if !proposal.reason.isEmpty {
-                        Text(proposal.reason)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    // 修改详情 Diff
-                    ForEach(proposal.changes) { change in
-                        HStack(alignment: .top, spacing: 4) {
-                            if !change.originalSnippet.isEmpty {
-                                Text("— \(change.originalSnippet)")
-                                    .strikethrough()
-                                    .foregroundStyle(Color.red.opacity(0.7))
+                                Button("忽略") {
+                                    viewModel.rejectDraftProposal(proposalId: proposal.id)
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
                             }
-                            Text("+ \(change.proposedSnippet)")
-                                .foregroundStyle(Color.green)
+
+                            if !proposal.reason.isEmpty {
+                                Text(proposal.reason)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            // 修改详情 Diff
+                            ForEach(proposal.changes) { change in
+                                HStack(alignment: .top, spacing: 4) {
+                                    if !change.originalSnippet.isEmpty {
+                                        Text("— \(change.originalSnippet)")
+                                            .strikethrough()
+                                            .foregroundStyle(Color.red.opacity(0.7))
+                                    }
+                                    Text("+ \(change.proposedSnippet)")
+                                        .foregroundStyle(Color.green)
+                                }
+                                .font(.system(size: 10, design: .monospaced))
+                            }
                         }
-                        .font(.system(size: 10, design: .monospaced))
+                        .padding(6)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
                     }
                 }
-                .padding(6)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
             }
+            .frame(maxHeight: 140)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(NSColor.windowBackgroundColor).opacity(0.7)))
@@ -538,35 +586,40 @@ public struct WorkingDraftCardView: View {
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            ForEach(draft.sources) { source in
-                HStack(spacing: 6) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(draft.sources) { source in
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
 
-                    Text(source.sourceName.isEmpty ? "剪贴板材料" : source.sourceName)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .lineLimit(1)
+                            Text(source.sourceName.isEmpty ? "剪贴板材料" : source.sourceName)
+                                .font(.system(size: 10.5, weight: .medium))
+                                .lineLimit(1)
 
-                    Text(source.content.prefix(40))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                            Text(source.content.prefix(40))
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
 
-                    Spacer()
+                            Spacer()
 
-                    Button {
-                        viewModel.removeSourceFromDraft(sourceId: source.id)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            Button {
+                                viewModel.removeSourceFromDraft(sourceId: source.id)
+                            } label: {
+                                Image(systemName: "minus.circle")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("从当前草稿移出并重新整理")
+                        }
+                        .padding(.vertical, 2)
                     }
-                    .buttonStyle(.plain)
-                    .help("从当前草稿移出并重新整理")
                 }
-                .padding(.vertical, 2)
             }
+            .frame(maxHeight: 120)
         }
         .padding(6)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.03)))
@@ -575,39 +628,42 @@ public struct WorkingDraftCardView: View {
     // MARK: - 9. 未决问题与交互确认 (LLM-C03)
 
     private func unresolvedItemsView(_ draft: WorkingDraft) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(draft.unresolvedItems) { item in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "questionmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.orange)
-                        Text(item.question)
-                            .font(.system(size: 11, weight: .medium))
-                        if let res = item.resolvedValue {
-                            Text("（已选：\(res)）")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-
-                    // 快速交互确认选项按钮 (LLM-C03)
-                    if item.resolvedValue == nil && !item.suggestedValues.isEmpty {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(draft.unresolvedItems) { item in
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
-                            ForEach(item.suggestedValues, id: \.self) { val in
-                                Button(val) {
-                                    viewModel.resolveUnresolvedItem(itemId: item.id, answer: val)
-                                }
-                                .clipMateGlass(size: .small)
-                                .font(.system(size: 10))
+                            Image(systemName: "questionmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.orange)
+                            Text(item.question)
+                                .font(.system(size: 11, weight: .medium))
+                            if let res = item.resolvedValue {
+                                Text("（已选：\(res)）")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
                             }
+                            Spacer()
                         }
-                        .padding(.leading, 18)
+
+                        // 快速交互确认选项按钮 (LLM-C03)
+                        if item.resolvedValue == nil && !item.suggestedValues.isEmpty {
+                            HStack(spacing: 6) {
+                                ForEach(item.suggestedValues, id: \.self) { val in
+                                    Button(val) {
+                                        viewModel.resolveUnresolvedItem(itemId: item.id, answer: val)
+                                    }
+                                    .clipMateGlass(size: .small)
+                                    .font(.system(size: 10))
+                                }
+                            }
+                            .padding(.leading, 18)
+                        }
                     }
                 }
             }
         }
+        .frame(maxHeight: 120)
         .padding(6)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.08)))
     }

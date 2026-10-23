@@ -924,20 +924,20 @@ public enum InteractiveControlEngine {
             ]
             for pat in deadlinePatterns {
                 if let dRegex = try? NSRegularExpression(pattern: pat),
-                   let match = dRegex.firstMatch(in: session.originalText, range: NSRange(session.originalText.startIndex..., in: session.originalText)) {
-                    let groupIdx = match.range(at: 1).location != NSNotFound ? 1 : 2
-                    if let r = Range(match.range(at: groupIdx), in: session.originalText),
-                       let deadMins = parseTimeMinutes(String(session.originalText[r])) {
-                        if latestEndMinutes > deadMins {
-                            let overtime = latestEndMinutes - deadMins
-                            conflicts.append(InteractiveConflict(
-                                id: "schedule_overtime",
-                                message: "截止时间为 \(String(session.originalText[r]))，调整后日程已超时 \(overtime) 分钟",
-                                severity: .warning
-                            ))
-                        }
-                        break
+                   let match = dRegex.firstMatch(in: session.originalText, range: NSRange(session.originalText.startIndex..., in: session.originalText)),
+                   match.numberOfRanges > 1,
+                   match.range(at: 1).location != NSNotFound,
+                   let r = Range(match.range(at: 1), in: session.originalText),
+                   let deadMins = parseTimeMinutes(String(session.originalText[r])) {
+                    if latestEndMinutes > deadMins {
+                        let overtime = latestEndMinutes - deadMins
+                        conflicts.append(InteractiveConflict(
+                            id: "schedule_overtime",
+                            message: "截止时间为 \(String(session.originalText[r]))，调整后日程已超时 \(overtime) 分钟",
+                            severity: .warning
+                        ))
                     }
+                    break
                 }
             }
         }

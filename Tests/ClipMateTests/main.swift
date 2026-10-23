@@ -3247,6 +3247,184 @@ runner.run("Acceptance LLM-C05: DraftSource 稳定 SHA-256 哈希计算跨生命
     runner.expectEqual(hash1.count, 32, "指纹长度应为 32 字符 (16 字节 SHA-256) hex")
 }
 
+runner.run("Acceptance BUG-04: createDraftFromSelected / submitDraftRevision 在完成或失败后 isDraftGenerating 状态安全重置") {
+    let (store, _) = try makeTempStore()
+    let item = try store.capture(kind: .text, plainText: "材料内容", sourceBundle: "", sourceName: "").item
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    vm.multiSelectedIDs = [item.id]
+    vm.createDraftFromSelected()
+    runner.expectFalse(vm.isDraftGenerating, "创建草稿完成后 isDraftGenerating 必须为 false")
+
+    vm.submitDraftRevision(instruction: "调整格式")
+    let deadline = Date().addingTimeInterval(3)
+    while vm.isDraftGenerating && Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    runner.expectFalse(vm.isDraftGenerating, "提交指令处理完毕后 isDraftGenerating 必须重置为 false")
+}
+
+runner.run("Acceptance BUG-07: addSourceToActiveDraft 支持手动追加来源并防止重复添加") {
+    let (store, _) = try makeTempStore()
+    let item1 = try store.capture(kind: .text, plainText: "材料1", sourceBundle: "", sourceName: "").item
+    let item2 = try store.capture(kind: .text, plainText: "材料2", sourceBundle: "", sourceName: "").item
+
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    vm.multiSelectedIDs = [item1.id]
+    vm.createDraftFromSelected()
+    runner.expectEqual(vm.activeDraft?.sources.count, 1, "初始材料数量应为 1")
+
+    vm.addSourceToActiveDraft(item: item2)
+    runner.expectEqual(vm.activeDraft?.sources.count, 2, "成功添加新来源")
+    runner.expectTrue(vm.activeDraft?.sources.contains(where: { $0.id == item2.id }) == true, "应包含 item2")
+
+    // 重复添加 item2
+    vm.addSourceToActiveDraft(item: item2)
+    runner.expectEqual(vm.activeDraft?.sources.count, 2, "重复添加同一来源应被去重拦截")
+}
+
+runner.run("Acceptance BUG-09: removeDraft 支持关闭单份草稿并自动切换当前活跃草稿") {
+    let (store, _) = try makeTempStore()
+    let id1 = try store.capture(kind: .text, plainText: "材料1", sourceBundle: "", sourceName: "").item.id
+    let id2 = try store.capture(kind: .text, plainText: "材料2", sourceBundle: "", sourceName: "").item.id
+
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    vm.multiSelectedIDs = [id1]
+    vm.createDraftFromSelected()
+    let draft1Id = vm.activeDraft!.id
+
+    vm.multiSelectedIDs = [id2]
+    vm.createDraftFromSelected()
+    let draft2Id = vm.activeDraft!.id
+
+    runner.expectEqual(vm.drafts.count, 2, "此时应有 2 份草稿")
+    runner.expectEqual(vm.activeDraft?.id, draft2Id, "活跃草稿为草稿2")
+
+    // 关闭草稿2
+    vm.removeDraft(id: draft2Id)
+    runner.expectEqual(vm.drafts.count, 1, "关闭后仅剩 1 份草稿")
+    runner.expectEqual(vm.activeDraft?.id, draft1Id, "活跃草稿应自动切换到草稿1")
+
+    // 关闭草稿1
+    vm.removeDraft(id: draft1Id)
+    runner.expectEqual(vm.drafts.count, 0, "所有草稿关闭后 drafts 应为空")
+    runner.expectTrue(vm.activeDraft == nil, "活跃草稿应置空")
+}
+
+runner.run("Acceptance BUG-10: createDraftFromSelected 立即计算并刷新 ZoomLevels 与衍生状态") {
+    let (store, _) = try makeTempStore()
+    let item = try store.capture(kind: .text, plainText: "第一行会议要点。\n第二行重要结论与行动项。\n第三行后续跟进计划。", sourceBundle: "", sourceName: "").item
+
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    vm.multiSelectedIDs = [item.id]
+    vm.createDraftFromSelected()
+
+    runner.expectTrue(vm.activeDraft != nil, "草稿创建成功")
+    runner.expectFalse(vm.activeDraft?.zoomLevels.isEmpty ?? true, "创建草稿后 zoomLevels 不应为空")
+    runner.expectEqual(vm.activeDraft?.zoomLevels[.full], vm.activeDraft?.fullDraftText, "初始 .full 层级应包含完整草稿文本")
+    runner.expectFalse(vm.activeDraft?.effectiveText.isEmpty ?? true, "effectiveText 应立即可用")
+}
+
+runner.run("Acceptance BUG-11: generateZoomLevels 基于 fullDraftText，避免变焦自截断") {
+    let ai = AIService(settings: AppSettings())
+    let draftAI = DraftAIService(ai: ai)
+    var draft = WorkingDraft(
+        status: .confirmed,
+        confirmedText: "第一行：重要会议通知内容。\n第二行：相关人员需按时参加并提交材料。\n第三行：特此通知，请严格遵照执行。",
+        version: 1
+    )
+    WorkingDraftEngine.refreshDerivedState(draft: &draft)
+    draft.currentZoom = .oneLine
+
+    let sema = DispatchSemaphore(value: 0)
+    var newZooms: [ZoomLevel: String] = [:]
+    Task {
+        newZooms = await draftAI.generateZoomLevels(draft: draft)
+        sema.signal()
+    }
+    _ = sema.wait(timeout: .now() + 5)
+
+    runner.expectEqual(newZooms[.full], draft.fullDraftText, ".full 变焦层级必须保留完整的 fullDraftText，不得发生自截断")
+    runner.expectTrue(newZooms[.full]?.contains("特此通知") == true, "变焦生成不得丢失全文尾部")
+}
+
+runner.run("Acceptance BUG-12: applyControlValue 调整数值控件时清除 userEditedText 遮蔽") {
+    let (store, _) = try makeTempStore()
+    let item = try store.capture(kind: .text, plainText: "人数：2 人\n预算：100 元", sourceBundle: "", sourceName: "").item
+    let control = DraftGoalControl(
+        name: "人数",
+        type: .stepper(min: 1, max: 10, step: 1, unit: "人", isInteger: true),
+        currentValue: "2"
+    )
+    var draft = WorkingDraft(
+        status: .confirmed,
+        sources: [DraftSource(id: item.id, content: item.plainText ?? "")],
+        confirmedText: "人数：2 人\n预算：100 元",
+        userEditedText: "人数：2 人\n预算：100 元（人工补充备注）",
+        controls: [control]
+    )
+    runner.expectEqual(draft.effectiveText, "人数：2 人\n预算：100 元（人工补充备注）", "存在 userEditedText 时优先显示")
+
+    let ok = WorkingDraftEngine.applyControlValue(draft: &draft, controlID: control.id, newValue: "5")
+    runner.expectTrue(ok, "应用数值控件应成功")
+    runner.expectTrue(draft.userEditedText == nil, "应用控件后必须清除 userEditedText")
+    runner.expectTrue(draft.effectiveText.contains("人数：5 人"), "清除遮蔽后应显示新计算的 confirmedText")
+}
+
+runner.run("Acceptance BUG-13: confirmClearAll 批量清空历史时同步标记未固定草稿来源为 excluded") {
+    let (store, _) = try makeTempStore()
+    let pinnedItem = try store.capture(kind: .text, plainText: "固定材料", sourceBundle: "", sourceName: "").item
+    try store.setPinned(pinnedItem.id, true)
+    let unpinnedItem = try store.capture(kind: .text, plainText: "未固定材料", sourceBundle: "", sourceName: "").item
+
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    vm.multiSelectedIDs = [pinnedItem.id, unpinnedItem.id]
+    vm.createDraftFromSelected()
+    runner.expectTrue(vm.activeDraft != nil, "草稿创建成功")
+    runner.expectEqual(vm.activeDraft?.activeSourcesCount, 2, "初始应有两个活跃材料")
+
+    vm.confirmClearAll()
+
+    runner.expectEqual(vm.activeDraft?.activeSourcesCount, 1, "清空后未固定的材料应被标记为 excluded，仅剩固定材料活跃")
+    let unpinnedSource = vm.activeDraft?.sources.first(where: { $0.id == unpinnedItem.id })
+    runner.expectEqual(unpinnedSource?.status, .excluded, "未固定材料的状态应为 excluded")
+}
+
+runner.run("Acceptance BUG-14: handleCaptured 自动跟随材料去重保护") {
+    let (store, _) = try makeTempStore()
+    let item1 = try store.capture(kind: .text, plainText: "材料1内容", sourceBundle: "", sourceName: "").item
+    let settings = AppSettings()
+    let vm = PanelViewModel(store: store, settings: settings, monitor: ClipboardMonitor(settings: settings, store: store), frontApps: FrontAppTracker(), ai: AIService(settings: settings))
+
+    vm.multiSelectedIDs = [item1.id]
+    vm.createDraftFromSelected()
+    vm.activeDraft?.followCopy = true
+
+    let initialSourceCount = vm.activeDraft?.sources.count ?? 0
+    vm.handleCaptured(item1)
+    runner.expectEqual(vm.activeDraft?.sources.count, initialSourceCount, "重复捕获的相同条目不应重复加入草稿来源")
+}
+
+runner.run("Acceptance BUG-17: InteractiveControlEngine 截止时间解析捕获组越界防护") {
+    let testText = "14:00–15:00 会议分享 | 15:00–16:00 讨论交流 | 截止时间：15:30"
+    if var session = InteractiveControlEngine.analyze(text: testText) {
+        if let _ = session.variables.first(where: { $0.id == "start_time" }) {
+            session.variables[0].currentValue = .time(hour: 15, minute: 0)
+            InteractiveControlEngine.recalculate(session: &session)
+            runner.expectTrue(session.conflicts.contains(where: { $0.id == "schedule_overtime" }), "应正确触发超时冲突检测且不越界崩溃")
+        }
+    }
+}
+
 print("----")
 
 

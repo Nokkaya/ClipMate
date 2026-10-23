@@ -31,6 +31,25 @@ struct SettingsView: View {
 
 // MARK: - 通用卡片与行布局组件
 
+private struct ModernInputModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5.5)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.04)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+            )
+    }
+}
+
+private extension View {
+    func modernInput() -> some View {
+        modifier(ModernInputModifier())
+    }
+}
+
 /// 统一风格的设置卡片容器
 private struct SettingsCard<Content: View>: View {
     let title: String
@@ -68,17 +87,17 @@ private struct SettingsCard<Content: View>: View {
                     trailingView
                 }
             }
-            Divider().overlay(Color.primary.opacity(0.06))
+            Divider().overlay(Color.primary.opacity(0.05))
             content
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.primary.opacity(0.035))
+            RoundedRectangle(cornerRadius: 11)
+                .fill(Color.primary.opacity(0.03))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 11)
+                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
         )
     }
 }
@@ -573,27 +592,37 @@ private struct SnippetsTab: View {
                 }
 
                 if let g = item.snippetGroup, !g.isEmpty {
-                    Text("🏷 \(g)")
-                        .font(.system(size: 9.5))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1.5)
-                        .background(Capsule().fill(Palette.snippet.opacity(0.14)))
-                        .foregroundStyle(Palette.snippet)
+                    HStack(spacing: 3) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 8))
+                        Text(g)
+                            .font(.system(size: 9.5))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(Palette.snippet.opacity(0.12)))
+                    .overlay(Capsule().strokeBorder(Palette.snippet.opacity(0.22), lineWidth: 0.8))
+                    .foregroundStyle(Palette.snippet)
                 }
 
                 if let sc = item.snippetShortcode, !sc.isEmpty {
-                    Text("⚡️ \(sc)")
-                        .font(.system(size: 9.5, design: .monospaced))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1.5)
-                        .background(Capsule().fill(Color.orange.opacity(0.15)))
-                        .foregroundStyle(Color.orange)
+                    HStack(spacing: 3) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 8))
+                        Text(sc)
+                            .font(.system(size: 9.5, design: .monospaced))
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(Color.orange.opacity(0.12)))
+                    .overlay(Capsule().strokeBorder(Color.orange.opacity(0.22), lineWidth: 0.8))
+                    .foregroundStyle(Color.orange)
                 }
 
                 Spacer()
 
                 Text(L10n.tr("meta.chars", item.plainText.count))
-                    .font(.system(size: 10))
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
 
                 // 快捷操作按钮
@@ -661,7 +690,7 @@ private struct SnippetsTab: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.03)))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
         )
     }
 
@@ -741,31 +770,31 @@ private struct SnippetsTab: View {
 
             // 字段
             VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Label(L10n.tr("snippets.title_optional"), systemImage: "textformat")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(.secondary)
                     TextField(L10n.tr("snippets.title_placeholder"), text: $draftTitle)
-                        .textFieldStyle(.roundedBorder)
+                        .modernInput()
                         .font(.system(size: 12))
                 }
 
                 HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Label(L10n.tr("snippets.group"), systemImage: "folder.fill")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(.secondary)
                         TextField(L10n.tr("snippets.group_placeholder"), text: $draftGroup)
-                            .textFieldStyle(.roundedBorder)
+                            .modernInput()
                             .font(.system(size: 12))
                     }
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Label(L10n.tr("snippets.shortcode_optional"), systemImage: "bolt.fill")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(.secondary)
                         TextField(L10n.tr("snippets.shortcode_placeholder"), text: $draftShortcode)
-                            .textFieldStyle(.roundedBorder)
+                            .modernInput()
                             .font(.system(size: 12, design: .monospaced))
                     }
                 }
@@ -775,7 +804,7 @@ private struct SnippetsTab: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 4) {
                             Text(L10n.tr("snippets.existing_groups"))
-                                .font(.system(size: 10))
+                                .font(.system(size: 9.5))
                                 .foregroundStyle(.tertiary)
                             ForEach(groups, id: \.self) { g in
                                 Button {
@@ -783,10 +812,11 @@ private struct SnippetsTab: View {
                                     HapticHelper.alignment()
                                 } label: {
                                     Text(g)
-                                        .font(.system(size: 10))
+                                        .font(.system(size: 9.5))
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(Capsule().fill(Color.primary.opacity(0.06)))
+                                        .background(Capsule().fill(Color.primary.opacity(0.05)))
+                                        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8))
                                         .foregroundStyle(.secondary)
                                 }
                                 .buttonStyle(.plain)
@@ -796,14 +826,14 @@ private struct SnippetsTab: View {
                     .modernScrollbar()
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     HStack {
                         Label(L10n.tr("snippets.content"), systemImage: "doc.text.fill")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text(L10n.tr("meta.chars", draftContent.count))
-                            .font(.system(size: 10))
+                            .font(.system(size: 9.5, design: .monospaced))
                             .foregroundStyle(.tertiary)
                     }
 
@@ -812,10 +842,10 @@ private struct SnippetsTab: View {
                         .scrollContentBackground(.hidden)
                         .modernScrollbar()
                         .padding(8)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.04)))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(Color.primary.opacity(0.09), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 7)
+                                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
                         )
                         .frame(height: 140)
                 }
@@ -1069,7 +1099,7 @@ private struct PrivacyTab: View {
 
                         HStack(spacing: 8) {
                             TextField(L10n.tr("privacy.input_placeholder"), text: $newBundleID)
-                                .textFieldStyle(.roundedBorder)
+                                .modernInput()
                                 .font(.system(size: 11.5, design: .monospaced))
 
                             Button(L10n.tr("action.add")) {
@@ -1164,31 +1194,31 @@ private struct AITab: View {
                 // 卡片 2: API 与模型配置
                 SettingsCard(L10n.tr("ai.card_model"), icon: "server.rack", iconColor: .blue) {
                     VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(L10n.tr("ai.endpoint"))
-                                .font(.system(size: 11.5, weight: .medium))
+                                .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(.secondary)
                             TextField(L10n.tr("ai.endpoint_placeholder"), text: $settings.aiEndpoint)
-                                .textFieldStyle(.roundedBorder)
+                                .modernInput()
                                 .font(.system(size: 12))
                         }
 
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(L10n.tr("ai.model_name"))
-                                .font(.system(size: 11.5, weight: .medium))
+                                .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(.secondary)
                             TextField(L10n.tr("ai.model_placeholder"), text: $settings.aiModel)
-                                .textFieldStyle(.roundedBorder)
+                                .modernInput()
                                 .font(.system(size: 12))
                         }
 
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(L10n.tr("ai.api_key"))
-                                .font(.system(size: 11.5, weight: .medium))
+                                .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(.secondary)
                             HStack(spacing: 8) {
                                 SecureField("sk-…", text: $apiKeyDraft)
-                                    .textFieldStyle(.roundedBorder)
+                                    .modernInput()
                                     .font(.system(size: 12))
                                 Button(L10n.tr("ai.save_key")) {
                                     settings.aiAPIKey = apiKeyDraft
@@ -1264,11 +1294,11 @@ private struct AITab: View {
 
                         HStack(spacing: 8) {
                             TextField(L10n.tr("ai.prompt_name_placeholder"), text: $newPromptName)
-                                .textFieldStyle(.roundedBorder)
+                                .modernInput()
                                 .font(.system(size: 11))
                                 .frame(width: 140)
                             TextField(L10n.tr("ai.prompt_content_placeholder"), text: $newPromptTemplate)
-                                .textFieldStyle(.roundedBorder)
+                                .modernInput()
                                 .font(.system(size: 11))
                             Button(L10n.tr("action.add")) {
                                 let n = newPromptName.trimmingCharacters(in: .whitespaces)
@@ -1554,11 +1584,11 @@ private struct ScriptsTab: View {
                 .pickerStyle(.segmented)
 
                 TextField(L10n.tr("scripts.name_placeholder"), text: $newName)
-                    .textFieldStyle(.roundedBorder)
+                    .modernInput()
                     .font(.system(size: 12))
 
                 TextField(newType == .shortcut ? L10n.tr("scripts.shortcut_placeholder") : L10n.tr("scripts.command_placeholder"), text: $newCommand)
-                    .textFieldStyle(.roundedBorder)
+                    .modernInput()
                     .font(.system(size: 11, design: .monospaced))
 
                 HStack {

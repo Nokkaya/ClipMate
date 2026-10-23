@@ -23,11 +23,14 @@ public struct AISidebarView: View {
                 errorBanner(error)
             }
             promptBar
-            Divider().overlay(Color.primary.opacity(0.08))
+            Divider().overlay(Color.primary.opacity(0.05))
             footer
         }
         .padding(14)
         .background(Color.primary.opacity(0.015))
+        .onDisappear {
+            viewModel.isAIPromptFocused = false
+        }
     }
 
     // MARK: - 头部
@@ -102,8 +105,8 @@ public struct AISidebarView: View {
                 .modernScrollbar()
             }
             .padding(7)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.035)))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.07)))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.03)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.8))
         } else {
             HStack {
                 Image(systemName: "hand.point.left")
@@ -336,6 +339,9 @@ public struct AISidebarView: View {
             .textFieldStyle(.plain)
             .font(.system(size: 12))
             .focused($isInputFocused)
+            .onChange(of: isInputFocused) { focused in
+                viewModel.isAIPromptFocused = focused
+            }
             .onSubmit {
                 submitQuestion()
             }

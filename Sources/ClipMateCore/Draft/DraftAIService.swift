@@ -402,13 +402,14 @@ public final class DraftAIService {
     public func generateZoomLevels(
         draft: WorkingDraft
     ) async -> [ZoomLevel: String] {
+        let baseText = draft.fullDraftText
         var result: [ZoomLevel: String] = [:]
-        result[.full] = draft.effectiveText
+        result[.full] = baseText
 
         guard isAvailable else {
             return draft.zoomLevels.isEmpty ? [
-                .full: draft.effectiveText,
-                .oneLine: String(draft.effectiveText.prefix(60))
+                .full: baseText,
+                .oneLine: String(baseText.prefix(60))
             ] : draft.zoomLevels
         }
 
@@ -426,7 +427,7 @@ public final class DraftAIService {
         }
         """
 
-        let userPrompt = "草稿正文：\n\(draft.effectiveText)"
+        let userPrompt = "草稿正文：\n\(baseText)"
 
         do {
             let response = try await collectResponse(system: systemPrompt, user: userPrompt)

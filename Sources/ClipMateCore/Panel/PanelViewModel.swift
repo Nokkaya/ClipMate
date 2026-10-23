@@ -122,7 +122,11 @@ public final class PanelViewModel: ObservableObject {
     @Published public var isDraftGenerating = false
     @Published public var isDraftReviewingDiff = false
     @Published public var draftErrorMessage: String? = nil
-    private var draftTask: Task<Void, Never>?
+    /// 草稿正文是否正处于微调编辑态（向 PanelController 传递键盘保护信号 BUG-01 / BUG-02）
+    @Published public var isDraftEditingText: Bool = false
+    /// AI 追问或草稿指令等输入框是否获得输入焦点
+    @Published public var isAIPromptFocused: Bool = false
+    public private(set) var draftTask: Task<Void, Never>?
     public let draftAI: DraftAIService
 
     public let store: ClipStore
@@ -334,6 +338,8 @@ public final class PanelViewModel: ObservableObject {
                 }
                 guard !Task.isCancelled, var currentDraft = self.activeDraft, currentDraft.id == targetId, currentDraft.version == targetVersion else { return }
                 if result.relation != .irrelevant {
+                    // BUG-14 去重保护：若已存在相同 item.id 的来源，避免重复添加导致 ForEach key 冲突
+                    guard !currentDraft.sources.contains(where: { $0.id == item.id }) else { return }
                     let newSource = DraftSource(
                         id: item.id,
                         versionHash: DraftSource.computeStableHash(item.plainText),
@@ -345,6 +351,12 @@ public final class PanelViewModel: ObservableObject {
                     currentDraft.sources.append(newSource)
                     if let proposal = result.proposal {
                         currentDraft.pendingProposals.append(proposal)
+                    } else if currentDraft.isCandidate {
+                        // 候选草稿且无修改建议时，基于新来源刷新候选文本与层级
+                        let recomputed = WorkingDraftEngine.createDraft(sources: currentDraft.sources, purpose: currentDraft.purpose, title: currentDraft.title)
+                        currentDraft.candidateText = recomputed.candidateText
+                        currentDraft.unresolvedItems = recomputed.unresolvedItems
+                        WorkingDraftEngine.refreshDerivedState(draft: &currentDraft)
                     }
                     currentDraft.changeSummary = result.summary.isEmpty ? "新材料已归入草稿" : result.summary
                     self.activeDraft = currentDraft
@@ -1111,7 +1123,9 @@ public final class PanelViewModel: ObservableObject {
     }
 
     public func confirmClearAll() {
+        let unpinnedIDs = Set(items.filter { !$0.pinned }.map { $0.id })
         try? store.deleteAll(keepPinned: true)
+        markDraftSourcesExcluded(itemIDs: unpinnedIDs)
         showConfirmClear = false
         queue.removeAll()
         reload()
@@ -1426,6 +1440,7 @@ public final class PanelViewModel: ObservableObject {
             isDraftGenerating = true
             draftTask = Task { @MainActor [weak self] in
                 guard let self = self else { return }
+                defer { self.isDraftGenerating = false }
                 let result = await self.draftAI.generateDraft(sources: sources, purpose: purpose)
                 guard !Task.isCancelled, var current = self.activeDraft, current.id == targetId else { return }
                 current.title = result.title
@@ -1434,8 +1449,8 @@ public final class PanelViewModel: ObservableObject {
                 current.controls = result.controls
                 current.unresolvedItems = result.unresolvedItems
                 current.changeSummary = result.summary
+                WorkingDraftEngine.refreshDerivedState(draft: &current)
                 self.activeDraft = current
-                self.isDraftGenerating = false
             }
         }
     }
@@ -1497,6 +1512,7 @@ public final class PanelViewModel: ObservableObject {
 
         draftTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
+            defer { self.isDraftGenerating = false }
             let proposal: DraftRevisionProposal?
             if self.draftAI.isAvailable && !self.settings.interactiveClipsLocalOnly {
                 proposal = await self.draftAI.proposeRevision(instruction: trimmed, draft: draft)
@@ -1513,7 +1529,6 @@ public final class PanelViewModel: ObservableObject {
                 current.changeSummary = "未能定位「\(trimmed)」关联位置"
             }
             self.activeDraft = current
-            self.isDraftGenerating = false
             HapticHelper.feedback()
         }
     }
@@ -1546,6 +1561,7 @@ public final class PanelViewModel: ObservableObject {
         isDraftGenerating = true
         draftTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
+            defer { self.isDraftGenerating = false }
             let proposal = await self.draftAI.proposeGoalAdjustment(draft: draft, control: control, newValue: newValue)
             guard !Task.isCancelled, var current = self.activeDraft, current.id == targetId, current.version == targetVersion else { return }
             if let prop = proposal {
@@ -1554,7 +1570,6 @@ public final class PanelViewModel: ObservableObject {
                 self.isDraftReviewingDiff = true
             }
             self.activeDraft = current
-            self.isDraftGenerating = false
             HapticHelper.feedback()
         }
     }
@@ -1703,5 +1718,39 @@ public final class PanelViewModel: ObservableObject {
 
         activeDraft = draft
         HapticHelper.alignment()
+    }
+
+    /// 将指定历史条目追加到当前活动草稿中 (BUG-07)
+    public func addSourceToActiveDraft(item: ClipItem) {
+        guard var draft = activeDraft else { return }
+        guard !draft.sources.contains(where: { $0.id == item.id }) else { return }
+        let newSource = DraftSource(
+            id: item.id,
+            versionHash: DraftSource.computeStableHash(item.plainText),
+            sourceName: item.sourceName,
+            sourceBundle: item.sourceBundle,
+            content: item.plainText,
+            timestamp: item.createdAt
+        )
+        draft.pushSnapshot()
+        draft.sources.append(newSource)
+        draft.changeSummary = "已加入材料来源「\(item.sourceName.isEmpty ? "剪贴板材料" : item.sourceName)」"
+        draft.version += 1
+        draft.updatedAt = Date()
+
+        if draft.isCandidate {
+            let recomputed = WorkingDraftEngine.createDraft(sources: draft.sources, purpose: draft.purpose, title: draft.title)
+            draft.candidateText = recomputed.candidateText
+            draft.unresolvedItems = recomputed.unresolvedItems
+            WorkingDraftEngine.refreshDerivedState(draft: &draft)
+        } else {
+            let additionSnippet = "• 补充材料（来自 \(item.sourceName.isEmpty ? "剪贴板材料" : item.sourceName)）：\n\(item.plainText)"
+            let change = DraftTextChange(originalSnippet: "", proposedSnippet: additionSnippet, reason: "用户主动添加材料来源", action: .insert)
+            let proposal = DraftRevisionProposal(title: "补充材料来源内容", reason: "纳入「\(item.sourceName.isEmpty ? "剪贴板材料" : item.sourceName)」", targetVersion: draft.version, changes: [change], relatedSourceIDs: [item.id])
+            draft.pendingProposals.append(proposal)
+            isDraftReviewingDiff = true
+        }
+        activeDraft = draft
+        HapticHelper.feedback()
     }
 }

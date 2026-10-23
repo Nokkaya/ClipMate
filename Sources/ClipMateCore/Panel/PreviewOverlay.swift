@@ -83,12 +83,12 @@ struct PreviewOverlay: View {
                         viewModel.settings.appTheme.backgroundTint
                     }
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(viewModel.settings.appTheme.borderColor, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(viewModel.settings.appTheme.borderColor.opacity(0.7), lineWidth: 0.8)
                 )
-                .shadow(color: .black.opacity(0.28), radius: 18, y: 6)
+                .shadow(color: .black.opacity(0.24), radius: 16, y: 5)
                 .task(id: item.id) {
                     previewImage = nil
                     isRawJSON = false
@@ -117,41 +117,42 @@ struct PreviewOverlay: View {
     private func header(_ item: ClipItem) -> some View {
         HStack(spacing: 8) {
             Image(systemName: item.kind.systemImage)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(item.kind.tintColor)
-                .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7).fill(item.kind.tintColor.opacity(0.14)))
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6).fill(item.kind.tintColor.opacity(0.12)))
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1.5) {
                 let headerText = item.title?.isEmpty == false ? item.title! : item.displayText
                 if !viewModel.query.isEmpty {
                     Text(TextHighlighter.highlight(text: headerText, query: viewModel.query))
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                 } else {
                     Text(headerText)
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                 }
 
-
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Text(item.kind.title)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(item.kind.tintColor)
 
-                    Text("·")
+                    Text("•")
+                        .font(.system(size: 7))
                         .foregroundStyle(.tertiary)
 
                     Text(TimeHelper.relative(item.createdAt))
-                        .font(.system(size: 10))
+                        .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
 
                     if !item.sourceName.isEmpty {
-                        Text("·")
+                        Text("•")
+                            .font(.system(size: 7))
                             .foregroundStyle(.tertiary)
                         Text(item.sourceName)
-                            .font(.system(size: 10))
+                            .font(.system(size: 9.5))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -162,14 +163,15 @@ struct PreviewOverlay: View {
             if item.pinned {
                 HStack(spacing: 3) {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: 8.5))
                     Text(L10n.tr("preview.pinned"))
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9.5, weight: .semibold))
                 }
                 .foregroundStyle(Palette.pin)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2.5)
-                .background(Capsule().fill(Palette.pin.opacity(0.15)))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Palette.pin.opacity(0.12)))
+                .overlay(Capsule().strokeBorder(Palette.pin.opacity(0.25), lineWidth: 0.8))
             }
 
             Button {
@@ -178,7 +180,7 @@ struct PreviewOverlay: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 14))
             }
-            .clipMateIconButton(size: 22)
+            .clipMateIconButton(size: 20)
             .keyboardShortcut(.cancelAction)
         }
     }
@@ -238,7 +240,7 @@ struct PreviewOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: item.plainText.isEmpty ? 220 : 160)
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8))
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
 
             if !item.plainText.isEmpty {
@@ -304,7 +306,7 @@ struct PreviewOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: item.plainText.isEmpty ? 220 : 160)
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8))
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
 
             if !item.plainText.isEmpty {
@@ -338,7 +340,7 @@ struct PreviewOverlay: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 32, height: 32)
                         .clipShape(RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.1)))
+                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8))
                 } else {
                     Image(systemName: "link.circle.fill")
                         .font(.system(size: 30))
@@ -383,11 +385,6 @@ struct PreviewOverlay: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                     Spacer()
-                    Button(L10n.tr("preview.url_copy")) {
-                        viewModel.copy(item: item)
-                        HapticHelper.feedback()
-                    }
-                    .clipMateGlass(size: .small)
                 }
 
                 ScrollView {
@@ -447,7 +444,7 @@ struct PreviewOverlay: View {
             .modernScrollbar()
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8))
         }
     }
 
@@ -462,13 +459,8 @@ struct PreviewOverlay: View {
                 Spacer()
                 let lineCount = item.plainText.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
                 Text(L10n.tr("meta.lines", lineCount))
-                    .font(.system(size: 10))
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                Button(L10n.tr("preview.code_copy")) {
-                    viewModel.copy(item: item)
-                    HapticHelper.feedback()
-                }
-                .clipMateGlass(size: .small)
             }
 
             ScrollView {
@@ -492,7 +484,7 @@ struct PreviewOverlay: View {
             .frame(maxHeight: 185)
             .modernScrollbar()
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8))
         }
     }
 
@@ -553,11 +545,6 @@ struct PreviewOverlay: View {
                 Text(L10n.tr("meta.chars", item.plainText.count))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                Button(L10n.tr("action.copy")) {
-                    viewModel.copy(item: item)
-                    HapticHelper.feedback()
-                }
-                .clipMateGlass(size: .small)
             }
 
             ScrollView {
@@ -590,7 +577,7 @@ struct PreviewOverlay: View {
             .modernScrollbar()
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8))
         }
     }
 
@@ -612,10 +599,11 @@ struct PreviewOverlay: View {
             HStack(spacing: 4) {
                 ForEach(item.tags.prefix(2), id: \.self) { tag in
                     Text(L10n.tagTitle(tag, lang: viewModel.settings.appLanguage))
-                        .font(.system(size: 9.5))
+                        .font(.system(size: 9))
                         .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(item.kind.tintColor.opacity(0.14)))
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(item.kind.tintColor.opacity(0.12)))
+                        .overlay(Capsule().strokeBorder(item.kind.tintColor.opacity(0.22), lineWidth: 0.8))
                         .foregroundStyle(item.kind.tintColor)
                         .lineLimit(1)
                 }
@@ -624,6 +612,7 @@ struct PreviewOverlay: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.8))
     }
 
     private func metaCell(_ title: String, _ value: String) -> some View {
@@ -639,17 +628,17 @@ struct PreviewOverlay: View {
 
     // MARK: - 底部操作
     private func footer(_ item: ClipItem) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 5) {
             HStack(spacing: 5) {
                 // 次要动作图标按钮组
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Button(role: .destructive) {
                         viewModel.previewItem = nil
                         viewModel.delete(item: item)
                     } label: {
                         Image(systemName: "trash")
                     }
-                    .clipMateIconButton(size: 26, tint: .red)
+                    .clipMateIconButton(size: 24, tint: .red)
                     .help(L10n.tr("preview.tip_delete"))
 
                     if item.kind != .image {
@@ -659,7 +648,7 @@ struct PreviewOverlay: View {
                         } label: {
                             Image(systemName: "pencil")
                         }
-                        .clipMateIconButton(size: 26)
+                        .clipMateIconButton(size: 24)
                         .help(L10n.tr("preview.tip_edit"))
                     }
 
@@ -668,7 +657,7 @@ struct PreviewOverlay: View {
                     } label: {
                         Image(systemName: item.isSnippet ? "bookmark.fill" : "bookmark")
                     }
-                    .clipMateIconButton(size: 26, tint: item.isSnippet ? Palette.snippet : nil)
+                    .clipMateIconButton(size: 24, tint: item.isSnippet ? Palette.snippet : nil)
                     .help(item.isSnippet ? L10n.tr("preview.tip_snippet_edit") : L10n.tr("preview.tip_snippet_save"))
 
                     Button {
@@ -677,7 +666,7 @@ struct PreviewOverlay: View {
                     } label: {
                         Image(systemName: "list.number")
                     }
-                    .clipMateIconButton(size: 26, tint: viewModel.queue.contains { $0.id == item.id } ? Color.accentColor : nil)
+                    .clipMateIconButton(size: 24, tint: viewModel.queue.contains { $0.id == item.id } ? Color.accentColor : nil)
                     .help(viewModel.queue.contains { $0.id == item.id } ? L10n.tr("preview.tip_queue_remove") : L10n.tr("preview.tip_queue_add"))
                 }
 
@@ -736,10 +725,10 @@ struct PreviewOverlay: View {
     }
 
     private func extractedFieldsBar(_ fields: [ExtractedField]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Label(L10n.tr("preview.extracted_fields", lang: viewModel.settings.appLanguage), systemImage: "sparkle.magnifyingglass")
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if selectedField != nil {
@@ -765,18 +754,18 @@ struct PreviewOverlay: View {
                                 Image(systemName: field.kind.systemImage)
                                     .font(.system(size: 8))
                                 Text("\(field.label): \(field.value)")
-                                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                                    .font(.system(size: 9.5, weight: isSelected ? .semibold : .regular))
                                     .lineLimit(1)
                             }
                             .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
+                            .padding(.vertical, 2.5)
                             .background(
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.05))
+                                    .fill(isSelected ? Color.accentColor.opacity(0.20) : Color.primary.opacity(0.04))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: 1)
+                                    .strokeBorder(isSelected ? Color.accentColor.opacity(0.4) : Color.primary.opacity(0.07), lineWidth: 0.8)
                             )
                             .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
                         }
@@ -809,8 +798,8 @@ struct PreviewOverlay: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.12)))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.10)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(0.28), lineWidth: 0.8))
             .foregroundStyle(Color.accentColor)
         }
         .buttonStyle(.plain)

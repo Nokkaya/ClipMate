@@ -212,29 +212,29 @@ public struct ClipRowView: View, Equatable {
                 }
 
 
-                HStack(spacing: 6) {
-                    if !item.sourceName.isEmpty {
-                        Text(item.sourceName)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(L10n.relativeTime(item.createdAt, lang: language))
+                HStack(spacing: 5) {
+                    let metaText: String = {
+                        let timeStr = L10n.relativeTime(item.createdAt, lang: language)
+                        return item.sourceName.isEmpty ? timeStr : "\(item.sourceName) • \(timeStr)"
+                    }()
+                    Text(metaText)
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
+
                     if let group = item.snippetGroup, !group.isEmpty {
-                        Text("🏷 \(group)")
+                        Text(group)
                             .font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Palette.snippet.opacity(0.14)))
+                            .background(Capsule().fill(Palette.snippet.opacity(0.12)))
                             .foregroundStyle(Palette.snippet)
                     }
                     if let shortcode = item.snippetShortcode, !shortcode.isEmpty {
-                        Text("⚡️ \(shortcode)")
+                        Text(shortcode)
                             .font(.system(size: 9, design: .monospaced))
-                            .padding(.horizontal, 5)
+                            .padding(.horizontal, 4)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.orange.opacity(0.15)))
+                            .background(Capsule().fill(Color.orange.opacity(0.12)))
                             .foregroundStyle(Color.orange)
                     }
                     ForEach(item.tags.filter { $0 != FilterKind.snippetTag && $0 != item.snippetGroup }.prefix(2), id: \.self) { tag in
@@ -242,7 +242,7 @@ public struct ClipRowView: View, Equatable {
                             .font(.system(size: 9))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(item.kind.tintColor.opacity(0.13)))
+                            .background(Capsule().fill(item.kind.tintColor.opacity(0.10)))
                             .foregroundStyle(item.kind.tintColor)
                     }
                 }
@@ -315,18 +315,18 @@ public struct ClipRowView: View, Equatable {
                 .foregroundStyle(.secondary)
                 .opacity(item.useCount > 1 ? 1 : 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(rowBackground)
         )
         .overlay(alignment: .leading) {
             if selected {
-                RoundedRectangle(cornerRadius: 1)
+                RoundedRectangle(cornerRadius: 1.5)
                     .fill(theme.accent)
-                    .frame(width: 3, height: 22)
-                    .padding(.leading, 3)
+                    .frame(width: 3, height: 18)
+                    .padding(.leading, 2)
             }
         }
         .contentShape(Rectangle())
@@ -346,20 +346,20 @@ public struct ClipRowView: View, Equatable {
             // 色值条目：直接展示色卡
             Circle()
                 .fill(swatch)
-                .frame(width: 20, height: 20)
-                .overlay(Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
-                .shadow(color: swatch.opacity(0.4), radius: 3, y: 1)
-                .frame(width: 22)
+                .frame(width: 18, height: 18)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.8))
+                .shadow(color: swatch.opacity(0.35), radius: 2.5, y: 1)
+                .frame(width: 24)
 
         } else if item.kind == .image, let thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: 46, height: 34)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .frame(width: 44, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.8)
                 )
         } else if item.kind == .url, let thumbnail {
             Image(nsImage: thumbnail)
@@ -367,17 +367,17 @@ public struct ClipRowView: View, Equatable {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 18, height: 18)
                 .clipShape(RoundedRectangle(cornerRadius: 3))
-                .frame(width: 22)
+                .frame(width: 24)
         } else if item.isSnippet {
             Image(systemName: "bookmark.fill")
-                .font(.system(size: 15))
+                .font(.system(size: 14))
                 .foregroundStyle(Palette.snippet)
-                .frame(width: 22)
+                .frame(width: 24)
         } else {
             Image(systemName: item.kind.systemImage)
-                .font(.system(size: 15))
+                .font(.system(size: 14))
                 .foregroundStyle(item.kind.tintColor)
-                .frame(width: 22)
+                .frame(width: 24)
         }
     }
 
@@ -426,21 +426,21 @@ public struct ClipRowView: View, Equatable {
                         .font(.system(size: 9.5, weight: .semibold))
                     if let badge = rec.badge {
                         Text(badge)
-                            .font(.system(size: 8.5))
+                            .font(.system(size: 8))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
-                            .background(Capsule().fill(theme.accent.opacity(0.18)))
+                            .background(Capsule().fill(theme.accent.opacity(0.14)))
                     }
                 }
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
                 .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(theme.accent.opacity(0.12))
+                    Capsule()
+                        .fill(theme.accent.opacity(0.10))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .strokeBorder(theme.accent.opacity(0.32), lineWidth: 1)
+                    Capsule()
+                        .strokeBorder(theme.accent.opacity(0.24), lineWidth: 0.8)
                 )
                 .foregroundStyle(theme.accent)
             }
@@ -456,7 +456,7 @@ public struct ClipRowView: View, Equatable {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 8.5))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 3)
                 }
@@ -505,7 +505,7 @@ struct FieldPillView: View {
             Button(action: onCopy) {
                 Image(systemName: "doc.on.doc")
                     .font(.system(size: 7.5))
-                    .foregroundStyle(hovered ? theme.accent : Color.secondary.opacity(0.7))
+                    .foregroundStyle(hovered ? theme.accent : Color.secondary.opacity(0.6))
                     .padding(.horizontal, 1)
             }
             .buttonStyle(.plain)
@@ -514,19 +514,19 @@ struct FieldPillView: View {
             if index < 3 {
                 Text("⌥\(index + 1)")
                     .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(isFocused ? theme.accent : Color.secondary.opacity(0.5))
+                    .foregroundStyle(isFocused ? theme.accent : Color.secondary.opacity(0.45))
             }
         }
-        .padding(.leading, 5)
-        .padding(.trailing, 4)
-        .padding(.vertical, 2)
+        .padding(.leading, 6)
+        .padding(.trailing, 5)
+        .padding(.vertical, 2.5)
         .background(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(isFocused ? theme.accent.opacity(0.2) : (hovered ? Color.primary.opacity(0.08) : Color.primary.opacity(0.04)))
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(isFocused ? theme.accent.opacity(0.18) : (hovered ? Color.primary.opacity(0.06) : Color.primary.opacity(0.03)))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .strokeBorder(isFocused ? theme.accent : (hovered ? Color.primary.opacity(0.18) : Color.primary.opacity(0.08)), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(isFocused ? theme.accent.opacity(0.45) : (hovered ? Color.primary.opacity(0.12) : Color.primary.opacity(0.05)), lineWidth: 0.8)
         )
         .onHover { hovered = $0 }
         .help(field.value)
@@ -705,12 +705,12 @@ struct InlineActionResultCard: View {
         }
         .padding(7)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(theme.accent.opacity(0.06))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.accent.opacity(0.05))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(theme.accent.opacity(0.25), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(theme.accent.opacity(0.18), lineWidth: 0.8)
         )
         .padding(.top, 2)
     }

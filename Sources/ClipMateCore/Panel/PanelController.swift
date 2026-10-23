@@ -272,6 +272,11 @@ final class PanelController {
             }
         }
 
+        // 草稿微调正文编辑态：除 Esc 外放行给 TextEditor (BUG-01 / BUG-02)
+        if viewModel.isDraftEditingText {
+            if event.keyCode == 53 { viewModel.isDraftEditingText = false; return true }
+            return false
+        }
         // 编辑浮层：除 Esc 外放行给 TextEditor
         if viewModel.showEditOverlay {
             if event.keyCode == 53 { viewModel.showEditOverlay = false; return true }
@@ -323,6 +328,10 @@ final class PanelController {
             return false // 允许在搜索框等文本控件中进行正常的字符左右光标移动
 
         case 36: // Return
+            // BUG-01: 若处于 AI 追问、草稿指令或输入框中，放行由原生控件 onSubmit/onCommit 消费
+            if viewModel.isAIPromptFocused {
+                return false
+            }
             // CM-05: 优先处理带有修饰键（⌘、⇧、⌥等）的快捷键，保证已有组合键原有语义不受破坏
             if flags.contains(.command) && flags.contains(.shift) {
                 viewModel.pasteQueue()          // ⌘⇧⏎ 顺序粘贴队列
@@ -349,9 +358,13 @@ final class PanelController {
                 viewModel.pasteSelected()       // ⏎ 粘贴
             }
             return true
-        case 51: // Delete
-            if !flags.contains(.command) && !flags.contains(.option) && !flags.contains(.control)
-                && viewModel.query.isEmpty {
+        case 51: // Delete (退格键)
+            // 无论输入框是否有文字，单按退格键（⌫ 无 Command）一律放行给文本系统处理，绝对不误删历史条目
+            if !flags.contains(.command) {
+                return false
+            }
+            // 仅当用户明确按下 ⌘⌫ (Command + Delete) 且非正文编辑态时，才执行条目删除（符合 macOS 标准快捷键规范）
+            if cmdOnly && !viewModel.isDraftEditingText {
                 if viewModel.multiSelectedIDs.count > 1 {
                     viewModel.deleteMulti()     // 批量删除
                 } else {
@@ -374,15 +387,22 @@ final class PanelController {
                 return true
             }
             return false
-        case 6 where cmdOnly: // ⌘Z 撤销内容控件单步调节
-            if let session = viewModel.activeInteractiveSession, !session.undoStack.isEmpty {
+        case 6 where cmdOnly: // ⌘Z 优先撤销工作草稿修改，其次撤销内容控件单步调节 (BUG-05)
+            if let draft = viewModel.activeDraft, !draft.undoStack.isEmpty {
+                viewModel.undoDraft()
+                return true
+            } else if let session = viewModel.activeInteractiveSession, !session.undoStack.isEmpty {
                 viewModel.undoInteractiveSession(itemID: session.itemID)
                 return true
             }
             return false
-        case 53: // Esc：退字段焦点 → 复位控件修改 → 清多选 → 收起 AI 侧边栏 → 清搜索词 → 隐藏
+        case 53: // Esc：退字段焦点 → 收起草稿差异对比/错误横幅 → 复位控件修改 → 清多选 → 收起 AI 侧边栏 → 清搜索词 → 隐藏 (BUG-06)
             if viewModel.selectedFieldIndex != nil {
                 viewModel.selectedFieldIndex = nil
+            } else if viewModel.isDraftReviewingDiff {
+                viewModel.isDraftReviewingDiff = false
+            } else if viewModel.draftErrorMessage != nil {
+                viewModel.draftErrorMessage = nil
             } else if let session = viewModel.activeInteractiveSession, session.isModified {
                 viewModel.resetInteractiveSession(itemID: session.itemID)
             } else if viewModel.multiSelectedIDs.count > 0 {
