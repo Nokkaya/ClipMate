@@ -233,7 +233,7 @@ Sources/
 
 `UpdateManager` 为**自研实现**（不依赖 Sparkle 库，仅复用其 appcast 格式）：
 
-- Feed 取自 Info.plist 的 `SUFeedURL`，默认 `https://raw.githubusercontent.com/zhangdi/ClipMate/main/appcast.xml`。
+- Feed 取自 Info.plist 的 `SUFeedURL`，默认 `https://raw.githubusercontent.com/Nokkaya/ClipMate/main/appcast.xml`。
 - 解析 feed 中全部 `<item>` 并取版本号最高的一条（`sparkle:shortVersionString` 的元素与属性两种写法都支持）。
 - 启动后静默检查，且距上次检查超过 24 小时才触发；设置页可手动检查。
 - 发现新版本后**仅提示并跳转浏览器下载页**，不内置下载 / 安装，也不做签名或哈希校验——请以 Releases 页面的 SHA-256 自行核对。

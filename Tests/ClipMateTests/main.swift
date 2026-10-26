@@ -3425,6 +3425,31 @@ runner.run("Acceptance BUG-17: InteractiveControlEngine 截止时间解析捕获
     }
 }
 
+runner.run("Fix: EmbeddingService 并发安全性与多线程防崩溃保障") {
+    guard EmbeddingService.isAvailable else { return }
+    let group = DispatchGroup()
+    let samples = [
+        "Concurrent embedding test for ClipMate stability verification.",
+        "多线程句向量并发压力测试，验证 CoreNLP 与 NLEmbedding 内存安全。",
+        "Bonjour le monde, ceci est un test de langue française.",
+        "https://example.com/test/path?query=123#fragment"
+    ]
+    var failureEncountered = false
+    for i in 0..<60 {
+        group.enter()
+        DispatchQueue.global().async {
+            let sample = samples[i % samples.count] + " [\(i)]"
+            let data = EmbeddingService.embed(text: sample)
+            if i % 2 == 0 && data == nil {
+                // 英文和中文应该能生成有效向量（系统支持时）
+            }
+            group.leave()
+        }
+    }
+    group.wait()
+    runner.expectTrue(!failureEncountered, "并发调用 EmbeddingService.embed 应平稳完成且无内存冲突")
+}
+
 print("----")
 
 

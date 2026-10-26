@@ -12,7 +12,7 @@ if [ ! -d "$APP" ]; then
     exit 1
 fi
 
-VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist" 2>/dev/null || echo "0.2.0")
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist" 2>/dev/null || echo "0.1.0")
 DMG_NAME="ClipMate-${VERSION}.dmg"
 DMG_PATH="dist/${DMG_NAME}"
 STAGING="dist/dmg-staging"

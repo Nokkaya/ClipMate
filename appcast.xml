@@ -2,15 +2,15 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>ClipMate Changelog</title>
-    <link>https://raw.githubusercontent.com/zhangdi/ClipMate/main/appcast.xml</link>
+    <link>https://raw.githubusercontent.com/Nokkaya/ClipMate/main/appcast.xml</link>
     <description>Most recent changes with links to updates.</description>
     <language>en</language>
     <item>
-      <title>Version 0.2.0</title>
-      <pubDate>Tue, 08 Sep 2026 17:27:17 +0800</pubDate>
-      <sparkle:releaseNotesLink>https://github.com/zhangdi/ClipMate/releases/tag/v0.2.0</sparkle:releaseNotesLink>
+      <title>Version 0.1.0</title>
+      <pubDate>Mon, 26 Oct 2026 16:50:32 +0800</pubDate>
+      <sparkle:releaseNotesLink>https://github.com/Nokkaya/ClipMate/releases/tag/v0.1.0</sparkle:releaseNotesLink>
       <description><![CDATA[
-        <h2>ClipMate v0.2.0</h2>
+        <h2>ClipMate v0.1.0</h2>
         <ul>
           <li>内置 AI 智能问答侧边栏，支持与主历史无缝联动。</li>
           <li>Liquid Glass 液态毛玻璃按钮与现代微光设计。</li>
@@ -18,10 +18,10 @@
           <li>正式发布 DMG 安装镜像与自动更新支持。</li>
         </ul>
       ]]></description>
-      <enclosure url="https://github.com/zhangdi/ClipMate/releases/download/v0.2.0/ClipMate-0.2.0.dmg"
-                 sparkle:version="2"
-                 sparkle:shortVersionString="0.2.0"
-                 length="3184717"
+      <enclosure url="https://github.com/Nokkaya/ClipMate/releases/download/v0.1.0/ClipMate-0.1.0.dmg"
+                 sparkle:version="1"
+                 sparkle:shortVersionString="0.1.0"
+                 length="4094060"
                  type="application/octet-stream" />
     </item>
   </channel>

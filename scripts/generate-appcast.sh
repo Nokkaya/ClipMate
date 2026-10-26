@@ -9,8 +9,8 @@ if [ ! -d "$APP" ]; then
     exit 1
 fi
 
-VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist" 2>/dev/null || echo "0.2.0")
-BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP/Contents/Info.plist" 2>/dev/null || echo "2")
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist" 2>/dev/null || echo "0.1.0")
+BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP/Contents/Info.plist" 2>/dev/null || echo "1")
 DMG_NAME="ClipMate-${VERSION}.dmg"
 DMG_PATH="dist/${DMG_NAME}"
 
@@ -21,7 +21,7 @@ fi
 
 LENGTH=$(stat -f%z "$DMG_PATH" 2>/dev/null || wc -c < "$DMG_PATH")
 PUB_DATE=$(date -R 2>/dev/null || date +"%a, %d %b %Y %H:%M:%S %z")
-DOWNLOAD_URL="https://github.com/zhangdi/ClipMate/releases/download/v${VERSION}/${DMG_NAME}"
+DOWNLOAD_URL="https://github.com/Nokkaya/ClipMate/releases/download/v${VERSION}/${DMG_NAME}"
 OUTPUT_XML="appcast.xml"
 
 cat > "$OUTPUT_XML" <<XML
@@ -29,13 +29,13 @@ cat > "$OUTPUT_XML" <<XML
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>ClipMate Changelog</title>
-    <link>https://raw.githubusercontent.com/zhangdi/ClipMate/main/appcast.xml</link>
+    <link>https://raw.githubusercontent.com/Nokkaya/ClipMate/main/appcast.xml</link>
     <description>Most recent changes with links to updates.</description>
     <language>en</language>
     <item>
       <title>Version ${VERSION}</title>
       <pubDate>${PUB_DATE}</pubDate>
-      <sparkle:releaseNotesLink>https://github.com/zhangdi/ClipMate/releases/tag/v${VERSION}</sparkle:releaseNotesLink>
+      <sparkle:releaseNotesLink>https://github.com/Nokkaya/ClipMate/releases/tag/v${VERSION}</sparkle:releaseNotesLink>
       <description><![CDATA[
         <h2>ClipMate v${VERSION}</h2>
         <ul>

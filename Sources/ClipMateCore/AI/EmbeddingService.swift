@@ -6,7 +6,9 @@ import NaturalLanguage
 public enum EmbeddingService {
     /// 系统是否具备可用的句向量能力。
     public static var isAvailable: Bool {
-        sentenceEmbedding() != nil
+        lock.lock()
+        defer { lock.unlock() }
+        return sentenceEmbedding(for: .english) != nil
     }
 
     /// 当前主语言是否受支持（供 UI 提示）。
@@ -14,8 +16,10 @@ public enum EmbeddingService {
         "英语及部分系统支持语言（系统按内容语言自动选择模型）"
     }
 
-    private static let cacheLock = NSLock()
-    private static var embeddingCache: [NLLanguage: NLEmbedding] = [:]
+    /// NLEmbedding 与底层的 CoreNLP 并非线程安全，并发调用 vector(for:) 会触发内部内存争抢与 malloc 崩溃。
+    /// 必须使用互斥锁严格串行化推理调用与模型缓存。
+    private static let lock = NSLock()
+    private static var embeddingCache: [NLLanguage: NLEmbedding?] = [:]
 
     /// 生成文本向量（Float32 编码）；不可用返回 nil。
     public static func embed(text: String) -> Data? {
@@ -23,27 +27,42 @@ public enum EmbeddingService {
         guard !trimmed.isEmpty else { return nil }
         let input = String(trimmed.prefix(2000))
 
+        lock.lock()
+        defer { lock.unlock() }
+
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(input)
         let language = recognizer.dominantLanguage ?? .english
 
-        guard let embedding = sentenceEmbedding(for: language) ?? sentenceEmbedding(for: .english),
+        guard let embedding = resolveEmbedding(for: language),
               let vector = embedding.vector(for: input), !vector.isEmpty else { return nil }
         return ClipStore.data(from: vector)
     }
 
-    private static func sentenceEmbedding() -> NLEmbedding? {
-        sentenceEmbedding(for: .english)
+    /// 解析指定语言对应的句向量模型（含缓存与安全回退逻辑）。
+    /// 调用方必须持有 lock。
+    private static func resolveEmbedding(for language: NLLanguage) -> NLEmbedding? {
+        if let cached = embeddingCache[language] {
+            return cached
+        }
+        var embedding = sentenceEmbedding(for: language)
+        // 繁体中文回退尝试简体中文模型
+        if embedding == nil && language == .traditionalChinese {
+            embedding = sentenceEmbedding(for: .simplifiedChinese)
+        }
+        // 未决或判定为英语时使用英语模型
+        if embedding == nil && (language == .undetermined || language == .english) {
+            embedding = sentenceEmbedding(for: .english)
+        }
+        embeddingCache[language] = embedding
+        return embedding
     }
 
+    /// 底层加载句向量模型并缓存（含未就绪或不支持的 nil 结果）；必须在持有 lock 时调用。
     private static func sentenceEmbedding(for language: NLLanguage) -> NLEmbedding? {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
         if let cached = embeddingCache[language] { return cached }
         let embedding = NLEmbedding.sentenceEmbedding(for: language)
-        if let embedding {
-            embeddingCache[language] = embedding
-        }
+        embeddingCache[language] = embedding
         return embedding
     }
 }

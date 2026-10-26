@@ -18,16 +18,16 @@ public final class UpdateManager: ObservableObject {
     @Published public private(set) var isChecking: Bool = false
 
     /// 默认发布与下载页面
-    public static let defaultReleasesURL = URL(string: "https://github.com/zhangdi/ClipMate/releases")!
+    public static let defaultReleasesURL = URL(string: "https://github.com/Nokkaya/ClipMate/releases")!
 
     /// 当前本地应用版本号
     public var currentVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
     }
 
     /// 当前本地构建号
     public var currentBuild: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "2"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
     }
 
     /// 远端 Appcast Feed URL（优先读取 Info.plist 的 SUFeedURL）
@@ -36,7 +36,7 @@ public final class UpdateManager: ObservableObject {
            let url = URL(string: feedString) {
             return url
         }
-        return URL(string: "https://raw.githubusercontent.com/zhangdi/ClipMate/main/appcast.xml")!
+        return URL(string: "https://raw.githubusercontent.com/Nokkaya/ClipMate/main/appcast.xml")!
     }
 
     private init() {}

@@ -23,12 +23,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>         <string>ClipMate</string>
     <key>CFBundlePackageType</key>        <string>APPL</string>
     <key>CFBundleIconFile</key>           <string>AppIcon</string>
-    <key>CFBundleShortVersionString</key> <string>0.2.0</string>
-    <key>CFBundleVersion</key>            <string>2</string>
+    <key>CFBundleShortVersionString</key> <string>0.1.0</string>
+    <key>CFBundleVersion</key>            <string>1</string>
     <key>LSMinimumSystemVersion</key>     <string>13.0</string>
     <key>LSUIElement</key>                <true/>
     <key>NSHighResolutionCapable</key>    <true/>
-    <key>SUFeedURL</key>                  <string>https://raw.githubusercontent.com/zhangdi/ClipMate/main/appcast.xml</string>
+    <key>SUFeedURL</key>                  <string>https://raw.githubusercontent.com/Nokkaya/ClipMate/main/appcast.xml</string>
     <key>SUEnableAutomaticChecks</key>    <true/>
 </dict>
 </plist>
