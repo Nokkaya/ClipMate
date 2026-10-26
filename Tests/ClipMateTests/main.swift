@@ -3365,7 +3365,7 @@ runner.run("Acceptance BUG-12: applyControlValue 调整数值控件时清除 use
     )
     var draft = WorkingDraft(
         status: .confirmed,
-        sources: [DraftSource(id: item.id, content: item.plainText ?? "")],
+        sources: [DraftSource(id: item.id, content: item.plainText)],
         confirmedText: "人数：2 人\n预算：100 元",
         userEditedText: "人数：2 人\n预算：100 元（人工补充备注）",
         controls: [control]
@@ -3434,7 +3434,7 @@ runner.run("Fix: EmbeddingService 并发安全性与多线程防崩溃保障") {
         "Bonjour le monde, ceci est un test de langue française.",
         "https://example.com/test/path?query=123#fragment"
     ]
-    var failureEncountered = false
+    let failureEncountered = false
     for i in 0..<60 {
         group.enter()
         DispatchQueue.global().async {
@@ -3448,6 +3448,111 @@ runner.run("Fix: EmbeddingService 并发安全性与多线程防崩溃保障") {
     }
     group.wait()
     runner.expectTrue(!failureEncountered, "并发调用 EmbeddingService.embed 应平稳完成且无内存冲突")
+}
+
+runner.run("Fix: HTML 实体解码避免二次转义缺陷") {
+    let raw = "Code: &amp;lt;div&amp;gt; &amp; &quot;hello&quot;"
+    let decoded = URLMetadataFetcher.decodeHTMLEntities(raw)
+    runner.expectEqual(decoded, "Code: &lt;div&gt; & \"hello\"", "&amp; 必须最后解码，避免 double-unescaping")
+}
+
+runner.run("Fix: 包含校验位 X 的 18 位身份证友好分组展示") {
+    let idCardX = "11010119900307205X"
+    let grouped = NumberRecognizer.displayText(idCardX)
+    runner.expectEqual(grouped, "110101 19900307 205X", "结尾为 X 的身份证应能正常按 6-8-4 位分组")
+}
+
+runner.run("Fix: 剪贴板恢复快照附带自身签名与 POSIX 文件路径装配") {
+    let mockSnapshot: [NSPasteboard.PasteboardType: Data] = [
+        .string: Data("previous content".utf8)
+    ]
+    PasteBack.restorePasteboard(mockSnapshot)
+    runner.expectTrue(NSPasteboard.general.types?.contains(PasteBack.ownedMarker) == true, "恢复快照后必须附带 ownedMarker 标记，防止回环重新采集")
+
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let testDb = try Database(url: dir.appendingPathComponent("test.sqlite"))
+    let testBlobs = BlobStore(directory: dir.appendingPathComponent("blobs"))
+    let testStore = try ClipStore(database: testDb, blobStore: testBlobs)
+    let fileItem = try testStore.capture(kind: .file, plainText: "/usr/bin/swift\n/usr/bin/git", sourceBundle: "", sourceName: "").item
+    if case .files(let urls) = testStore.pasteboardContent(for: fileItem) {
+        runner.expectEqual(urls.count, 2, "纯 POSIX 路径应成功组装为 file URLs")
+        runner.expectTrue(urls.allSatisfy(\.isFileURL), "所有 URL 必须具备 file:// 协议")
+    } else {
+        runner.expectTrue(false, "文件条目未正确组装为 .files 类型")
+    }
+}
+
+runner.run("Fix: 推荐引擎与检索在包含重复 ID 时的防崩溃稳定性") {
+    let mockItem = ClipItem(
+        id: 999,
+        kind: .text,
+        plainText: "Crash test text",
+        sourceBundle: "com.apple.finder",
+        sourceName: "Finder",
+        byteSize: 15,
+        createdAt: Date(),
+        lastUsedAt: Date(),
+        useCount: 1,
+        pinned: false,
+        tags: ["文本"],
+        meta: [:],
+        displayText: "Crash test text"
+    )
+    // 构造重复 ID 列表
+    let duplicateItems = [mockItem, mockItem]
+    var learning = RecommendationLearningStore()
+    learning.recordUsage(itemID: 999, appBundle: "com.apple.finder")
+    learning.recordUsage(itemID: 999, appBundle: "com.apple.finder")
+    // 调用推荐引擎计算，若使用 Dictionary(uniqueKeysWithValues:) 将直接崩溃
+    let recommendations = RecommendationEngine.computeRecommendations(
+        items: duplicateItems,
+        currentAppBundle: "com.apple.finder",
+        learningStore: learning
+    )
+    runner.expectTrue(!recommendations.isEmpty, "包含重复 ID 时推荐引擎应平稳计算且不发生 fatalError 闪退")
+}
+
+runner.run("Fix: Blob 文件共享引用时条目删除不误删文件") {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let testDb = try Database(url: dir.appendingPathComponent("test.sqlite"))
+    let testBlobs = BlobStore(directory: dir.appendingPathComponent("blobs"))
+    let testStore = try ClipStore(database: testDb, blobStore: testBlobs)
+
+    let dummyImageData = Data(repeating: 0x42, count: 128)
+    let item1 = try testStore.capture(
+        kind: .image,
+        plainText: "Image 1",
+        sourceBundle: "",
+        sourceName: "",
+        inlineData: dummyImageData,
+        imageOriginal: dummyImageData
+    ).item
+    guard let blobName = item1.blobName else {
+        runner.expectTrue(false, "item1 应该成功落盘 blob")
+        return
+    }
+
+    // 手动插入第二个条目，指向同一个 blob_name
+    let statement = try testDb.prepare("""
+        INSERT INTO clip (
+            kind, plain_text, source_bundle, source_name, content_hash,
+            byte_size, created_at, last_used_at, use_count, pinned,
+            tags, title, meta, inline_data, blob_name
+        ) VALUES ('image', 'Image 2', '', '', ?, 128, 0, 0, 1, 0, '[]', NULL, '{}', NULL, ?)
+    """)
+    statement.bind([.blob(Data("unique_hash_2".utf8)), .text(blobName)])
+    try statement.run()
+    let item2ID = testDb.lastInsertRowID
+
+    // 删除 item1：由于 item2 仍引用此 blobName，文件必须保留在磁盘上
+    try testStore.delete(item1.id)
+    runner.expectTrue(FileManager.default.fileExists(atPath: testBlobs.url(for: blobName).path), "存在共享引用的 blobName 在删除单个引用条目后不得被删除")
+
+    // 删除 item2：无其他引用，此时 blob 文件应被安全删除
+    try testStore.delete(item2ID)
+    runner.expectTrue(!FileManager.default.fileExists(atPath: testBlobs.url(for: blobName).path), "所有引用被删除后 blob 文件应被彻底清除")
 }
 
 print("----")

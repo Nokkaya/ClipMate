@@ -210,4 +210,11 @@ final class AppModel {
         alert.informativeText = message
         alert.runModal()
     }
+
+    deinit {
+        retentionTimer?.invalidate()
+        if let hotkeyObserver {
+            NotificationCenter.default.removeObserver(hotkeyObserver)
+        }
+    }
 }

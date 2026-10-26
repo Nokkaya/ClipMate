@@ -9,8 +9,8 @@
 
 [![macOS](https://img.shields.io/badge/macOS-13.0%2B-blue.svg?style=flat-square&logo=apple)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.9%20%7C%206.0-F05138.svg?style=flat-square&logo=swift)](https://swift.org)
-[![Release](https://img.shields.io/badge/release-v0.1.0-brightgreen.svg?style=flat-square)](https://github.com/Nokkaya/ClipMate/releases)
-[![Tests](https://img.shields.io/badge/tests-157%20passed-success.svg?style=flat-square)](https://github.com/Nokkaya/ClipMate)
+[![Release](https://img.shields.io/badge/release-v0.1.1-brightgreen.svg?style=flat-square)](https://github.com/Nokkaya/ClipMate/releases)
+[![Tests](https://img.shields.io/badge/tests-162%20passed-success.svg?style=flat-square)](https://github.com/Nokkaya/ClipMate)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20external-orange.svg?style=flat-square)](#-技术特性与架构)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
@@ -67,7 +67,7 @@ ClipMate 不仅具备高保真的剪贴板采集与全文/语义混合检索能�
 
 ### 方式一：下载 DMG 安装镜像（推荐）
 
-1. 从 [GitHub Releases](https://github.com/Nokkaya/ClipMate/releases/latest) 下载最新版本的 `ClipMate-0.1.0.dmg`。
+1. 从 [GitHub Releases](https://github.com/Nokkaya/ClipMate/releases/latest) 下载最新版本的 `ClipMate-0.1.1.dmg`。
 2. 双击打开镜像，将 `ClipMate.app` 拖入 `Applications` 应用程序文件夹。
 3. 首次启动时，按下全局快捷键 `⌘⇧V` 唤起主面板。
 
@@ -93,7 +93,7 @@ swift run
 
 # 3. 压制打包正式版 DMG
 ./make-dmg.sh
-# 产物将生成在 dist/ClipMate-0.1.0.dmg
+# 产物将生成在 dist/ClipMate-0.1.1.dmg
 ```
 
 > [!TIP]

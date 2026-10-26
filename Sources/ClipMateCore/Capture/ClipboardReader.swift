@@ -11,6 +11,22 @@ public struct CapturedContent {
     public var inlineData: Data?
     public var imageOriginal: Data?
     public var meta: [String: String]
+
+    public init(
+        kind: ClipKind,
+        plainText: String,
+        tags: [String],
+        inlineData: Data? = nil,
+        imageOriginal: Data? = nil,
+        meta: [String: String] = [:]
+    ) {
+        self.kind = kind
+        self.plainText = plainText
+        self.tags = tags
+        self.inlineData = inlineData
+        self.imageOriginal = imageOriginal
+        self.meta = meta
+    }
 }
 
 public enum ClipboardReader {

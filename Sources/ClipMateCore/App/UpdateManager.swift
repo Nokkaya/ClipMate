@@ -22,12 +22,12 @@ public final class UpdateManager: ObservableObject {
 
     /// 当前本地应用版本号
     public var currentVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.1"
     }
 
     /// 当前本地构建号
     public var currentBuild: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "2"
     }
 
     /// 远端 Appcast Feed URL（优先读取 Info.plist 的 SUFeedURL）
@@ -182,7 +182,11 @@ public final class UpdateManager: ObservableObject {
                 if fallback == nil { fallback = candidate }
                 continue
             }
-            if best == nil || Self.compareVersion(version, greaterThan: best!.version) {
+            if let currentBest = best {
+                if Self.compareVersion(version, greaterThan: currentBest.version) {
+                    best = candidate
+                }
+            } else {
                 best = candidate
             }
         }

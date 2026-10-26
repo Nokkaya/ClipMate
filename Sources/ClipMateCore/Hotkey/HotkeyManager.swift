@@ -7,7 +7,8 @@ public final class HotkeyManager {
     private var handlerRef: EventHandlerRef?
     public var onHotkey: (() -> Void)?
 
-    fileprivate static let signature: FourCharCode = 0x434C504D // 'CLPM'    public init() {}
+    fileprivate static let signature: FourCharCode = 0x434C504D // 'CLPM'
+    public init() {}
 
     public func register(keyCode: UInt32, modifiers: UInt32) {
         unregister()

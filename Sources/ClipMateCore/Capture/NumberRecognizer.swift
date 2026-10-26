@@ -85,6 +85,14 @@ public enum NumberRecognizer {
     /// 例如手机号 13812345678 → 138 1234 5678，卡号按 4 位一组。
     public static func grouped(_ text: String, kind: NumberKind) -> String? {
         let compact = strippingSeparators(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        if kind == .idCard, compact.count == 18 {
+            let prefix17 = compact.prefix(17)
+            let lastChar = compact.suffix(1)
+            if isAllDigits(String(prefix17)) && (lastChar.allSatisfy(\.isNumber) || lastChar == "X" || lastChar == "x") {
+                return split(compact, sizes: [6, 8, 4])
+            }
+            return nil
+        }
         guard isAllDigits(compact) else { return nil }
 
         switch kind {

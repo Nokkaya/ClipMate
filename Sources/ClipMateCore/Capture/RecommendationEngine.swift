@@ -157,7 +157,7 @@ public enum RecommendationEngine {
         // 构建条目映射与可推荐条目池（排除已忽略条目）
         let availableItems = items.filter { !learningStore.ignoredItemIDs.contains($0.id) }
         guard !availableItems.isEmpty else { return [] }
-        let itemMap = Dictionary(uniqueKeysWithValues: availableItems.map { ($0.id, $0) })
+        let itemMap = Dictionary(availableItems.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         var candidates: [RecommendedItem] = []
         var seenIDs = Set<Int64>()

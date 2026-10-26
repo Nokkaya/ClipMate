@@ -24,6 +24,7 @@ final class PanelController {
 
     private var keyMonitor: Any?
     private var resignKeyObserver: NSObjectProtocol?
+    private var moveObserver: NSObjectProtocol?
 
     init(store: ClipStore, settings: AppSettings, monitor: ClipboardMonitor,
          frontApps: FrontAppTracker, ai: AIService) {
@@ -64,7 +65,7 @@ final class PanelController {
             self?.hidePanel()
         }
 
-        NotificationCenter.default.addObserver(
+        moveObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification,
             object: panel,
             queue: .main
@@ -73,6 +74,16 @@ final class PanelController {
             let origin = self.panel.frame.origin
             self.viewModel.settings.lastPanelPositionX = origin.x
             self.viewModel.settings.lastPanelPositionY = origin.y
+        }
+    }
+
+    deinit {
+        removeKeyMonitor()
+        if let resignKeyObserver {
+            NotificationCenter.default.removeObserver(resignKeyObserver)
+        }
+        if let moveObserver {
+            NotificationCenter.default.removeObserver(moveObserver)
         }
     }
 

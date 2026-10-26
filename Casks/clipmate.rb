@@ -1,6 +1,6 @@
 cask "clipmate" do
-  version "0.1.0"
-  sha256 "c777ba24b0c106d14ab0517a12c223e8ca498bd4234c36293e67619183190cee"
+  version "0.1.1"
+  sha256 "9bf292826c9dc0bc75a5534f70caa676e85cec7649ae11b1cf2d23e6ae43fd4b"
 
   url "https://github.com/Nokkaya/ClipMate/releases/download/v#{version}/ClipMate-#{version}.dmg"
   name "ClipMate"

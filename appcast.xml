@@ -6,6 +6,26 @@
     <description>Most recent changes with links to updates.</description>
     <language>en</language>
     <item>
+      <title>Version 0.1.1</title>
+      <pubDate>Mon, 26 Oct 2026 17:35:00 +0800</pubDate>
+      <sparkle:releaseNotesLink>https://github.com/Nokkaya/ClipMate/releases/tag/v0.1.1</sparkle:releaseNotesLink>
+      <description><![CDATA[
+        <h2>ClipMate v0.1.1</h2>
+        <ul>
+          <li>修复推荐引擎与检索在包含重复条目 ID 时的崩溃防御。</li>
+          <li>修复图片与 PDF 原件共享哈希落盘时的引用计数保护，杜绝提前误删。</li>
+          <li>修复剪贴板快照恢复时的防自捕获循环回环机制与定时轮询抑制。</li>
+          <li>修复 SQLite 数据库连接生命周期与 NotificationCenter 观察者内存泄漏。</li>
+          <li>全面消除强制解包风险，增强多草稿管理状态流转。</li>
+        </ul>
+      ]]></description>
+      <enclosure url="https://github.com/Nokkaya/ClipMate/releases/download/v0.1.1/ClipMate-0.1.1.dmg"
+                 sparkle:version="2"
+                 sparkle:shortVersionString="0.1.1"
+                 length="4096169"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 0.1.0</title>
       <pubDate>Mon, 26 Oct 2026 16:50:32 +0800</pubDate>
       <sparkle:releaseNotesLink>https://github.com/Nokkaya/ClipMate/releases/tag/v0.1.0</sparkle:releaseNotesLink>

@@ -83,10 +83,15 @@ public enum PasteBack {
     public static func restorePasteboard(_ snapshot: [NSPasteboard.PasteboardType: Data]) {
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.declareTypes(Array(snapshot.keys), owner: nil)
+        var types = Array(snapshot.keys)
+        if !types.contains(ownedMarker) {
+            types.append(ownedMarker)
+        }
+        pb.declareTypes(types, owner: nil)
         for (type, data) in snapshot {
             pb.setData(data, forType: type)
         }
+        pb.setData(Data("1".utf8), forType: ownedMarker)
     }
 
     /// 校验是否允许恢复旧快照：

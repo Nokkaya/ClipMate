@@ -83,7 +83,7 @@ public struct AISidebarView: View {
                     Image(systemName: item.kind.systemImage)
                         .font(.system(size: 10))
                         .foregroundStyle(item.kind.tintColor)
-                    Text(item.title?.isEmpty == false ? item.title! : (item.sourceName.isEmpty ? item.kind.title : item.sourceName))
+                    Text((item.title?.isEmpty == false ? item.title : nil) ?? (item.sourceName.isEmpty ? item.kind.title : item.sourceName))
                         .font(.system(size: 11, weight: .medium))
                         .lineLimit(1)
                     Spacer()

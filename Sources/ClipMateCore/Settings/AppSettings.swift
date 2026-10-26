@@ -328,7 +328,13 @@ public final class AppSettings: ObservableObject {
     /// API Key 只进 Keychain，不落 UserDefaults。
     public var aiAPIKey: String {
         get { KeychainStore.string(forKey: "aiAPIKey") ?? "" }
-        set { try? KeychainStore.setString(newValue, forKey: "aiAPIKey") }
+        set {
+            if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                KeychainStore.delete("aiAPIKey")
+            } else {
+                try? KeychainStore.setString(newValue, forKey: "aiAPIKey")
+            }
+        }
     }
 
     public var maxCaptureBytes: Int { maxCaptureMB * 1024 * 1024 }

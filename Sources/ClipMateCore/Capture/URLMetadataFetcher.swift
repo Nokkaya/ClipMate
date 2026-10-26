@@ -135,7 +135,6 @@ public enum URLMetadataFetcher {
     /// 解码常见 HTML 字符实体
     public static func decodeHTMLEntities(_ text: String) -> String {
         var result = text
-            .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&quot;", with: "\"")
@@ -168,6 +167,9 @@ public enum URLMetadataFetcher {
                 }
             }
         }
+
+        // &amp; 必须最后解码，防止 double-unescaping（如 &amp;lt; 被错误解为 <）
+        result = result.replacingOccurrences(of: "&amp;", with: "&")
         return result
     }
 }

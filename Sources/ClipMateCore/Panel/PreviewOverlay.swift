@@ -123,7 +123,7 @@ struct PreviewOverlay: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(item.kind.tintColor.opacity(0.12)))
 
             VStack(alignment: .leading, spacing: 1.5) {
-                let headerText = item.title?.isEmpty == false ? item.title! : item.displayText
+                let headerText = (item.title?.isEmpty == false ? item.title : nil) ?? item.displayText
                 if !viewModel.query.isEmpty {
                     Text(TextHighlighter.highlight(text: headerText, query: viewModel.query))
                         .font(.system(size: 13, weight: .semibold))

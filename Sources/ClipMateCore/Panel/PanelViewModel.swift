@@ -1089,7 +1089,7 @@ public final class PanelViewModel: ObservableObject {
     /// 保存自定义标题（写入 title 列，可被检索命中）。
     public func saveRename() {
         guard let id = renameTargetID else { return }
-        try? store.setUserTitle(id, title: renameDraft)
+        _ = try? store.setUserTitle(id, title: renameDraft)
         closeRenameOverlay()
         reload()
         HapticHelper.feedback()
@@ -1098,7 +1098,7 @@ public final class PanelViewModel: ObservableObject {
     /// 直接清除自定义标题（右键菜单入口）。
     public func clearTitle(item: ClipItem? = nil) {
         guard let target = item ?? selectedItem else { return }
-        try? store.setUserTitle(target.id, title: nil)
+        _ = try? store.setUserTitle(target.id, title: nil)
         reload()
         HapticHelper.feedback()
     }
@@ -1106,7 +1106,7 @@ public final class PanelViewModel: ObservableObject {
     /// 清除自定义标题，恢复自动标题。
     public func clearRename() {
         guard let id = renameTargetID else { return }
-        try? store.setUserTitle(id, title: nil)
+        _ = try? store.setUserTitle(id, title: nil)
         closeRenameOverlay()
         reload()
         HapticHelper.feedback()
@@ -1696,7 +1696,7 @@ public final class PanelViewModel: ObservableObject {
         draft.updatedAt = Date()
 
         if draft.sources.isEmpty {
-            activeDraft = nil
+            removeDraft(id: draft.id)
             return
         }
 

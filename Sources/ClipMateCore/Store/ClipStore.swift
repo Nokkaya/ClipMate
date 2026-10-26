@@ -265,7 +265,7 @@ public final class ClipStore {
             }
 
             // 仅对缺失条目做一次批量取回（替代逐条 item(id:)），并应用类别过滤
-            var itemMap = Dictionary(uniqueKeysWithValues: textResults.map { ($0.id, $0) })
+            var itemMap = Dictionary(textResults.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let missing = vectorRankIDs.filter { itemMap[$0] == nil }
             for fetched in items(ids: missing) where matchesFilter(fetched, filter, snippetGroup: snippetGroup, context: context) {
                 itemMap[fetched.id] = fetched
@@ -852,7 +852,10 @@ public final class ClipStore {
                 .int(existing.id)
             ])
             try statement.run()
-            return item(id: existing.id)!
+            guard let result = item(id: existing.id) else {
+                throw NSError(domain: "ClipMate.ClipStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to reload snippet after update"])
+            }
+            return result
         }
 
         let statement = try db.prepare("""
@@ -876,7 +879,10 @@ public final class ClipStore {
             .text(json(meta))
         ])
         try statement.run()
-        return item(id: db.lastInsertRowID)!
+        guard let result = item(id: db.lastInsertRowID) else {
+            throw NSError(domain: "ClipMate.ClipStore", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to reload snippet after insert"])
+        }
+        return result
     }
 
     /// 更新片段元数据或正文
@@ -955,13 +961,20 @@ public final class ClipStore {
     }
 
     public func delete(_ id: Int64) throws {
-        if let item = item(id: id), let blobName = item.blobName {
-            blobs.remove(blobName)
-        }
+        let blobName = item(id: id)?.blobName
         let statement = try db.prepare("DELETE FROM clip WHERE id = ?")
         statement.bind([.int(id)])
         try statement.run()
         resetEmbeddingCache()
+
+        if let blobName {
+            // 确保没有其他条目引用同一 blobName 后再从磁盘删除，避免破坏共享哈希文件
+            let checkStmt = try? db.prepare("SELECT 1 FROM clip WHERE blob_name = ? LIMIT 1")
+            checkStmt?.bind([.text(blobName)])
+            if checkStmt?.step() != true {
+                blobs.remove(blobName)
+            }
+        }
     }
 
     public func deleteAll(keepPinned: Bool) throws {
@@ -1073,8 +1086,17 @@ public final class ClipStore {
         case .file:
             let urls = item.plainText
                 .components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-                .compactMap(URL.init(string:))
+                .compactMap { line -> URL? in
+                    if line.hasPrefix("file://") {
+                        return URL(string: line)
+                    } else if line.hasPrefix("/") {
+                        return URL(fileURLWithPath: line)
+                    } else {
+                        return URL(string: line)
+                    }
+                }
             guard !urls.isEmpty else { return nil }
             return .files(urls)
         }

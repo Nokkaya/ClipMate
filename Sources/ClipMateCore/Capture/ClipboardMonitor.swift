@@ -52,7 +52,8 @@ public final class ClipboardMonitor {
         // 若剪贴板内容由 ClipMate 自身写入（如回写粘贴或历史复制），跳过重复采集
         if types.contains(PasteBack.ownedMarker) { return }
 
-        // 仅在被显式标记且确认是自身写入时受 suppress 限制；外部新复制不被抑制时间窗抹杀
+        // 处于自身写入抑制时间窗、锁屏或暂停时跳过采集
+        guard Date() >= suppressUntil else { return }
         guard !screenLocked, !settings.pauseCapture else { return }
         // 密码框等安全输入场景跳过采集。
         guard !IsSecureEventInputEnabled() else { return }
@@ -121,14 +122,15 @@ public final class ClipboardMonitor {
                 if content.kind == .url && self.settings.fetchLinkMetadata && (result.isNew || result.item.title == nil),
                    let url = URL(string: content.plainText) {
                     let itemId = result.item.id
-                    Task.detached(priority: .utility) { [weak self] in
-                        guard let self else { return }
+                    let store = self.store
+                    let onItemUpdated = self.onItemUpdated
+                    Task.detached(priority: .utility) {
                         let (title, favicon) = await URLMetadataFetcher.fetchMetadata(for: url)
                         guard title != nil || favicon != nil else { return }
                         do {
-                            if let updated = try self.store.updateURLMetadata(itemId, title: title, faviconData: favicon) {
-                                DispatchQueue.main.async { [weak self] in
-                                    self?.onItemUpdated?(updated)
+                            if let updated = try store.updateURLMetadata(itemId, title: title, faviconData: favicon) {
+                                DispatchQueue.main.async {
+                                    onItemUpdated?(updated)
                                 }
                             }
                         } catch {

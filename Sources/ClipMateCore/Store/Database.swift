@@ -68,12 +68,15 @@ public final class Statement {
 
     /// 执行写语句（INSERT/UPDATE/DELETE）。
     public func run() throws {
+        defer {
+            sqlite3_reset(handle)
+            sqlite3_clear_bindings(handle)
+        }
         let rc = sqlite3_step(handle)
         guard rc == SQLITE_DONE || rc == SQLITE_ROW else {
-            throw StoreError.sql(String(cString: sqlite3_errmsg(sqlite3_db_handle(handle))))
+            let msg = sqlite3_errmsg(sqlite3_db_handle(handle)).map { String(cString: $0) } ?? "未知错误"
+            throw StoreError.sql(msg)
         }
-        sqlite3_reset(handle)
-        sqlite3_clear_bindings(handle)
     }
 
     /// SELECT 迭代：返回是否还有下一行。
@@ -85,8 +88,9 @@ public final class Statement {
     public func columnDouble(_ i: Int32) -> Double { sqlite3_column_double(handle, i) }
 
     public func columnText(_ i: Int32) -> String? {
-        guard sqlite3_column_type(handle, i) != SQLITE_NULL else { return nil }
-        return String(cString: sqlite3_column_text(handle, i))
+        guard sqlite3_column_type(handle, i) != SQLITE_NULL,
+              let ptr = sqlite3_column_text(handle, i) else { return nil }
+        return String(cString: ptr)
     }
 
     public func columnData(_ i: Int32) -> Data? {
@@ -108,7 +112,7 @@ public final class Database {
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         let rc = sqlite3_open_v2(url.path, &db, flags, nil)
         guard rc == SQLITE_OK, let opened = db else {
-            if let db { sqlite3_close(db) }
+            if let db { sqlite3_close_v2(db) }
             throw StoreError.openFailed(rc)
         }
         handle = opened
@@ -117,7 +121,7 @@ public final class Database {
     }
 
     deinit {
-        sqlite3_close(handle)
+        sqlite3_close_v2(handle)
     }
 
     private static func probeFTS5(handle: OpaquePointer) -> Bool {
